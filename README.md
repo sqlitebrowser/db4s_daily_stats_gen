@@ -1,2 +1,1 @@
-# db4s_daily_stats_gen
-Basic stats generator for DB4S daily users.  Based on '/currentrelease' requests
+This processes the DB4S client requests for '/currentrelease', to generate reasonably accurate basic stats for the number of active daily/weekly/monthy (etc) users.
