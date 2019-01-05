@@ -1,7 +1,18 @@
 package main
 
+// This generates basic status to answer two questions:
+//
+//   1) How many DB4S clients (unique ip address) are checking the '/currentrelease' version each day?
+//
+//      This should give us a rough idea of the size of our active userbase
+//
+//   2) How many of each version of DB4S are checking the '/currentrelease' version each day?
+//
+//      This should give us a rough idea of the mix of versions being used
+
 // NOTE: While much of this processing could instead be done using SQL directly in PG, it's not worth the time for
-//       me to learn/refresh my knowledge of the appropriate PG bits.  So, just going to do it using Go instead. ;)
+//       me to learn/refresh my knowledge of the appropriate PG bits at this point.  So, just going to do it using
+//       Go instead, even though it's less efficient processing-wise. ;)
 
 import (
 	"crypto/md5"
@@ -153,7 +164,7 @@ func main() {
 		hash [16]byte
 	}
 	userAgentAndIP := make(map[lookupKey]int)
-	userAgentOnly := make(map[string]int)
+	uniqueIPs := make(map[[16]byte]int)
 
 	// Retrieve entire result set of valid `/currentrelease` requests for the desired time range
 	dbQuery = `
@@ -161,15 +172,17 @@ func main() {
 		FROM download_log
 		WHERE request = '/currentrelease'
   			AND http_user_agent LIKE 'sqlitebrowser %' AND http_user_agent NOT LIKE '%AppEngine%'
-  			AND request_time > '2018-08-09 00:00'
-  			AND request_time < '2019-09-10 00:00'`
+			AND request_time > '2018-08-13 00:00 UTC'
+			AND request_time < '2018-08-14 00:00 UTC'`
 	rows, err := pg.Query(dbQuery)
 	if err != nil {
 		log.Printf("Database query failed: %v\n", err)
 		return
 	}
 	defer rows.Close()
+    rowCount := 0
 	for rows.Next() {
+		rowCount++
 		var userAgent pgtype.Text
 		var row entry
 		err = rows.Scan(&userAgent, &row.IPv4, &row.IPv6, &row.IPStrange)
@@ -192,19 +205,16 @@ func main() {
 			log.Fatalf("Doesn't seem to be any non-NULL client IP field for one of the rows")
 		}
 
+		// Update the unique IP address counter as appropriate
+		uniqueIPs[IPHash]++
+
 		// Increment the counter for that IP address + user agent combination
 		userAgentAndIP[lookupKey{userAgent.String, IPHash}]++
-
-		// If the IP address + user agent combination hasn't been counted before, then we increment the counter for the
-		// user agent for the day too
-		if n := userAgentAndIP[lookupKey{userAgent.String, IPHash}]; n == 1 {
-			userAgentOnly[userAgent.String]++
-		}
 	}
 
-
-
-
+	// Info while developing
+	log.Printf("Number of rows for 2018-08-13: %v\n", rowCount)
+	log.Printf("IP addresses for 2018-08-13: %v\n", len(uniqueIPs))
 
 
 
