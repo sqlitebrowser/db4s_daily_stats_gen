@@ -120,16 +120,22 @@ func main() {
 	log.Printf("Connected to PostgreSQL server: %v:%v\n", Conf.Pg.Server, uint16(Conf.Pg.Port))
 	pgSpan.Finish()
 
-	// Open connection to PG
-
 	// * Daily users *
-	startDate := time.Date(2018, 8, 13, 0, 0, 0, 0, time.UTC)
-	endDate := time.Date(2018, 8, 14, 0, 0, 0, 0, time.UTC)
-	numIPs, IPsPerUserAgent, err := getIPs(startDate, endDate)
 
-	// Info while developing
-	log.Printf("IP addresses for %v -> %v: %v\n", startDate.Format("2006 Jan 2"),
-		endDate.Format("2006 Jan 2"), numIPs)
+	// The earliest date with entries is 2018-08-13, so we start with that.  We repeatedly call the function for
+	// getting IP addresses, incrementing the date each time until we exceed time.Now()
+	startDate := time.Date(2018, 8, 13, 0, 0, 0, 0, time.UTC)
+	endDate := startDate.Add(time.Hour * 24)
+	var numIPs int
+	var IPsPerUserAgent map[string]int
+	for endDate.Before(time.Now()) {
+		numIPs, IPsPerUserAgent, err = getIPs(startDate, endDate)
+		startDate = startDate.Add(time.Hour * 24)
+		endDate = startDate.Add(time.Hour * 24)
+
+		// Info while developing
+		log.Printf("Unique IP addresses for %v: %v\n", startDate.Format("2006 Jan 2"), numIPs)
+	}
 
 	// Number of unique IP addresses per user agent
 	for i, j := range IPsPerUserAgent {
@@ -207,8 +213,7 @@ func getIPs(startDate time.Time, endDate time.Time) (IPs int, userAgentIPs map[s
 		ipMap[IPHash]++
 	}
 
-	// Info while developing
-	log.Printf("Number of rows for %v: %v\n", startDate, rowCount)
+	// Unique IP addresses
 	IPs = len(uniqueIPs)
 
 	// Number of unique IP addresses per user agent
