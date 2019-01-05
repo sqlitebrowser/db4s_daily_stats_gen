@@ -15,6 +15,7 @@ package main
 //       Go instead, even though it's less efficient processing-wise. ;)
 
 import (
+	"context"
 	"crypto/md5"
 	"crypto/tls"
 	"fmt"
@@ -128,23 +129,69 @@ func main() {
 	endDate := startDate.Add(time.Hour * 24)
 	var numIPs int
 	var IPsPerUserAgent map[string]int
+	dailySpan := tracer.StartSpan("calculate daily users")
+	ctx := opentracing.ContextWithSpan(context.Background(), dailySpan)
 	for endDate.Before(time.Now()) {
-		numIPs, IPsPerUserAgent, err = getIPs(startDate, endDate)
-		startDate = startDate.Add(time.Hour * 24)
-		endDate = startDate.Add(time.Hour * 24)
+		numIPs, _, err = getIPs(ctx, startDate, endDate)
+		//numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
+		startDate = startDate.AddDate(0, 0, 1)
+		endDate = startDate.AddDate(0, 0, 1)
 
 		// Info while developing
 		log.Printf("Unique IP addresses for %v: %v\n", startDate.Format("2006 Jan 2"), numIPs)
-	}
 
-	// Number of unique IP addresses per user agent
-	for i, j := range IPsPerUserAgent {
-		log.Printf("User agent: %v  Unique IP addresses: %v\n", i, j)
+		// Number of unique IP addresses per user agent
+		// TODO: Store the results back in the database
+		//for i, j := range IPsPerUserAgent {
+		//	log.Printf("User agent: %v  Unique IP addresses: %v\n", i, j)
+		//}
 	}
+	defer dailySpan.Finish()
 
 	// * Weekly users *
+	startDate = time.Date(2018, 8, 7, 0, 0, 0, 0, time.UTC)
+	endDate = startDate.AddDate(0, 0, 7)
+	weeklySpan := tracer.StartSpan("calculate daily users")
+	ctx = opentracing.ContextWithSpan(context.Background(), weeklySpan)
+	for endDate.Before(time.Now()) {
+		numIPs, _, err = getIPs(ctx, startDate, endDate)
+		//numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
+		startDate = startDate.AddDate(0, 0, 7)
+		endDate = startDate.AddDate(0, 0, 7)
+
+		// Info while developing
+		yr, wk := startDate.ISOWeek()
+		log.Printf("Unique IP addresses for week %v, %v: %v\n", yr, wk, numIPs)
+
+		// Number of unique IP addresses per user agent
+		// TODO: Store the results back in the database
+		for i, j := range IPsPerUserAgent {
+			log.Printf("User agent: %v  Unique IP addresses: %v\n", i, j)
+		}
+	}
+	defer weeklySpan.Finish()
 
 	// * Monthly users *
+	startDate = time.Date(2018, 8, 0, 0, 0, 0, 0, time.UTC)
+	endDate = startDate.AddDate(0, 1, 0)
+	monthlySpan := tracer.StartSpan("calculate daily users")
+	ctx = opentracing.ContextWithSpan(context.Background(), monthlySpan)
+	for endDate.Before(time.Now()) {
+		numIPs, _, err = getIPs(ctx, startDate, endDate)
+		//numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
+		startDate = startDate.AddDate(0, 1, 0)
+		endDate = startDate.AddDate(0, 1, 0)
+
+		// Info while developing
+		log.Printf("Unique IP addresses for month %v: %v\n", startDate.Format("2006 Jan"), numIPs)
+
+		// Number of unique IP addresses per user agent
+		// TODO: Store the results back in the database
+		for i, j := range IPsPerUserAgent {
+			log.Printf("User agent: %v  Unique IP addresses: %v\n", i, j)
+		}
+	}
+	defer monthlySpan.Finish()
 
 	// Close the PG connection gracefully
 	pg.Close()
@@ -152,8 +199,8 @@ func main() {
 
 // getIPs() returns the number of DB4S instances doing a version check in the given date range, plus a count of the
 // quantity per DB4S version
-func getIPs(startDate time.Time, endDate time.Time) (IPs int, userAgentIPs map[string]int, err error) {
-	span := tracer.StartSpan("getIPs")
+func getIPs(ctx context.Context, startDate time.Time, endDate time.Time) (IPs int, userAgentIPs map[string]int, err error) {
+	span, _ := opentracing.StartSpanFromContext(ctx, "getIPs")
 	defer span.Finish()
 	span.SetTag("start date", startDate)
 	span.SetTag("end date", endDate)
