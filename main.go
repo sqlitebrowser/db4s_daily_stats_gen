@@ -123,47 +123,15 @@ func main() {
 	// * Daily users *
 	var dbQuery string
 
-//	// Get list of all (valid) user agents in the date range
-//	dbQuery = `
-//		SELECT DISTINCT (http_user_agent)
-//		FROM download_log
-//		WHERE request = '/currentrelease'
-//  			AND http_user_agent LIKE 'sqlitebrowser %' AND http_user_agent NOT LIKE '%AppEngine%'
-//  			AND request_time > '2018-08-09 00:00'
-//  			AND request_time < '2019-09-10 00:00'`
-//
-//	rows, err := pg.Query(dbQuery)
-//	if err != nil {
-//		log.Printf("Database query failed: %v\n", err)
-//		return
-//	}
-//	defer rows.Close()
-//	var userAgents []string
-//	for rows.Next() {
-//		var userAgent pgtype.Text
-//		err = rows.Scan(&userAgent)
-//		if err != nil {
-//			log.Printf("Error retrieving rows: %v\n", err)
-//			return
-//		}
-//		if userAgent.Status == pgtype.Present {
-//			userAgents = append(userAgents, userAgent.String)
-//		}
-//	}
-//log.Printf("%v\n", userAgents)
-
 	type entry struct {
 		IPv4        pgtype.Text
 		IPv6        pgtype.Text
 		IPStrange   pgtype.Text
 	}
 
-	// Use a 2 part structure as the map key, to make counting user-agent + IP address easier
-	type lookupKey struct {
-		userAgent string
-		hash [16]byte
-	}
-	userAgentAndIP := make(map[lookupKey]int)
+	// This nested map approach (inside of a combined key) should allow for counting the # of unique IP's per user agent
+	IPsPerUserAgent := make(map[string]map[[16]byte]int)
+
 	uniqueIPs := make(map[[16]byte]int)
 
 	// Retrieve entire result set of valid `/currentrelease` requests for the desired time range
@@ -208,14 +176,23 @@ func main() {
 		// Update the unique IP address counter as appropriate
 		uniqueIPs[IPHash]++
 
-		// Increment the counter for that IP address + user agent combination
-		userAgentAndIP[lookupKey{userAgent.String, IPHash}]++
+		// Increment the counter for the user agent + IP address combination
+		ipMap, ok := IPsPerUserAgent[userAgent.String]
+		if !ok {
+			ipMap = make(map[[16]byte]int)
+			IPsPerUserAgent[userAgent.String] = ipMap
+		}
+		ipMap[IPHash]++
 	}
 
 	// Info while developing
 	log.Printf("Number of rows for 2018-08-13: %v\n", rowCount)
 	log.Printf("IP addresses for 2018-08-13: %v\n", len(uniqueIPs))
 
+    // Number of unique IP addresses per user agent
+    for i, j := range IPsPerUserAgent {
+		log.Printf("User agent: %v  Unique IP addresses: %v\n", i, len(j))
+	}
 
 
 	// * Weekly users *
