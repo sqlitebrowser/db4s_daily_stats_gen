@@ -18,6 +18,12 @@ import (
 	"crypto/md5"
 	"crypto/tls"
 	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"time"
+
 	"github.com/BurntSushi/toml"
 	"github.com/jackc/pgx"
 	"github.com/jackc/pgx/pgtype"
@@ -25,11 +31,6 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber/jaeger-client-go"
 	"github.com/uber/jaeger-client-go/config"
-	"io"
-	"log"
-	"os"
-	"path/filepath"
-	"time"
 )
 
 // Configuration file
@@ -57,6 +58,7 @@ var (
 	// PostgreSQL Connection pool
 	pg *pgx.ConnPool
 
+	// Jaeger connection
 	tracer opentracing.Tracer
 )
 
@@ -123,12 +125,6 @@ func main() {
 	// * Daily users *
 	var dbQuery string
 
-	type entry struct {
-		IPv4        pgtype.Text
-		IPv6        pgtype.Text
-		IPStrange   pgtype.Text
-	}
-
 	// This nested map approach (inside of a combined key) should allow for counting the # of unique IP's per user agent
 	IPsPerUserAgent := make(map[string]map[[16]byte]int)
 
@@ -148,12 +144,12 @@ func main() {
 		return
 	}
 	defer rows.Close()
-    rowCount := 0
+	rowCount := 0
 	for rows.Next() {
 		rowCount++
 		var userAgent pgtype.Text
-		var row entry
-		err = rows.Scan(&userAgent, &row.IPv4, &row.IPv6, &row.IPStrange)
+		var IPv4, IPv6, IPStrange pgtype.Text
+		err = rows.Scan(&userAgent, &IPv4, &IPv6, &IPStrange)
 		if err != nil {
 			log.Printf("Error retrieving rows: %v\n", err)
 			return
@@ -162,12 +158,12 @@ func main() {
 		// Work out the key to use.  We use a hash of the IP address, to stop weird characters in the IP Strange field
 		// being a problem
 		var IPHash [16]byte
-		if row.IPStrange.Status == pgtype.Present {
-			IPHash = md5.Sum([]byte(row.IPStrange.String))
-		} else if row.IPv6.Status == pgtype.Present {
-			IPHash = md5.Sum([]byte(row.IPv6.String))
-		} else if row.IPv4.Status == pgtype.Present {
-			IPHash = md5.Sum([]byte(row.IPv4.String))
+		if IPStrange.Status == pgtype.Present {
+			IPHash = md5.Sum([]byte(IPStrange.String))
+		} else if IPv6.Status == pgtype.Present {
+			IPHash = md5.Sum([]byte(IPv6.String))
+		} else if IPv4.Status == pgtype.Present {
+			IPHash = md5.Sum([]byte(IPv4.String))
 		} else {
 			// This shouldn't happen, but check for it just in case
 			log.Fatalf("Doesn't seem to be any non-NULL client IP field for one of the rows")
@@ -189,11 +185,10 @@ func main() {
 	log.Printf("Number of rows for 2018-08-13: %v\n", rowCount)
 	log.Printf("IP addresses for 2018-08-13: %v\n", len(uniqueIPs))
 
-    // Number of unique IP addresses per user agent
-    for i, j := range IPsPerUserAgent {
+	// Number of unique IP addresses per user agent
+	for i, j := range IPsPerUserAgent {
 		log.Printf("User agent: %v  Unique IP addresses: %v\n", i, len(j))
 	}
-
 
 	// * Weekly users *
 
