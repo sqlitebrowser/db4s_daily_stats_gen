@@ -57,6 +57,9 @@ var (
 	// Application config
 	Conf TomlConfig
 
+	// Toggle for display of debugging info
+	debug = true
+
 	// PostgreSQL Connection pool
 	pg *pgx.ConnPool
 
@@ -147,8 +150,16 @@ func main() {
 		startDate = startDate.AddDate(0, 0, 1)
 		endDate = startDate.AddDate(0, 0, 1)
 
-		// Info while developing
-		log.Printf("Unique IP addresses for %v: %v\n", startDate.Format("2006 Jan 2"), numIPs)
+		// Display debug info if appropriate
+		if debug {
+			log.Printf("Unique IP addresses for %v: %v\n", startDate.Format("2006 Jan 2"), numIPs)
+		}
+
+		// Save the # of unique IP address to the db4s_stats_daily table
+		err = addDailyStats(startDate, numIPs)
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
 
 		// Number of unique IP addresses per user agent
 		// TODO: Store the results back in the database
@@ -205,6 +216,24 @@ func main() {
 
 	// Close the PG connection gracefully
 	pg.Close()
+}
+
+// addDailyStats() inserts new or updated daily stats counts into the db4s_stats_daily table
+func addDailyStats(date time.Time, count int) error {
+	dbQuery := `
+		INSERT INTO db4s_stats_daily (stats_date, unique_ips)
+		VALUES ($1, $2)`
+	// TODO: It would probably be useful to add an ON CONFLICT statement here, so the stats for the latest days can be
+	//       updated easily in this same function
+	commandTag, err := pg.Exec(dbQuery, date, count)
+	if err != nil {
+		// For now, don't bother logging a failure here.  This *might* need changing later on
+		return err
+	}
+	if numRows := commandTag.RowsAffected(); numRows != 1 {
+		log.Printf("Wrong number of rows (%v) affected when adding a daily stats row: %v\n", numRows, date)
+	}
+	return nil
 }
 
 // getIPs() returns the number of DB4S instances doing a version check in the given date range, plus a count of the
@@ -307,6 +336,8 @@ func updateUserAgents(ctx context.Context) error {
 	span, _ := opentracing.StartSpanFromContext(ctx, "update user agents")
 	defer span.Finish()
 
+	log.Printf("Updating DB4S user agents list in the database...")
+
 	// Get list of all (valid) user agents in the logs.  The ORDER BY clause here gives an alphabetical sorting rather
 	// than numerical, but it'll do for now.
 	dbQuery := `
@@ -339,13 +370,14 @@ func updateUserAgents(ctx context.Context) error {
 	for _, j := range userAgents {
 		dbQuery = `
 			INSERT INTO db4s_release_info (version_number)
-			VALUES ($1)`
+			VALUES ($1)
+			ON CONFLICT DO NOTHING`
 		commandTag, err := pg.Exec(dbQuery, j)
 		if err != nil {
 			// For now, don't bother logging a failure here.  This *might* need changing later on
 			return err
 		}
-		if numRows := commandTag.RowsAffected(); numRows != 1 {
+		if numRows := commandTag.RowsAffected(); numRows > 1 {
 			log.Printf("Wrong number of rows (%v) affected when adding release: %v\n", numRows, j)
 		}
 	}
