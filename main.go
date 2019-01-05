@@ -123,22 +123,48 @@ func main() {
 	// Open connection to PG
 
 	// * Daily users *
-	var dbQuery string
+	startDate := time.Date(2018, 8, 13, 0, 0, 0, 0, time.UTC)
+	endDate := time.Date(2018, 8, 14, 0, 0, 0, 0, time.UTC)
+	numIPs, IPsPerUserAgent, err := getIPs(startDate, endDate)
+
+	// Info while developing
+	log.Printf("IP addresses for %v -> %v: %v\n", startDate.Format("2006 Jan 2"),
+		endDate.Format("2006 Jan 2"), numIPs)
+
+	// Number of unique IP addresses per user agent
+	for i, j := range IPsPerUserAgent {
+		log.Printf("User agent: %v  Unique IP addresses: %v\n", i, j)
+	}
+
+	// * Weekly users *
+
+	// * Monthly users *
+
+	// Close the PG connection gracefully
+	pg.Close()
+}
+
+// getIPs() returns the number of DB4S instances doing a version check in the given date range, plus a count of the
+// quantity per DB4S version
+func getIPs(startDate time.Time, endDate time.Time) (IPs int, userAgentIPs map[string]int, err error) {
+	span := tracer.StartSpan("getIPs")
+	defer span.Finish()
+	span.SetTag("start date", startDate)
+	span.SetTag("end date", endDate)
 
 	// This nested map approach (inside of a combined key) should allow for counting the # of unique IP's per user agent
 	IPsPerUserAgent := make(map[string]map[[16]byte]int)
 
-	uniqueIPs := make(map[[16]byte]int)
-
 	// Retrieve entire result set of valid `/currentrelease` requests for the desired time range
-	dbQuery = `
+	uniqueIPs := make(map[[16]byte]int)
+	dbQuery := `
 		SELECT http_user_agent, client_ipv4, client_ipv6, client_ip_strange
 		FROM download_log
 		WHERE request = '/currentrelease'
   			AND http_user_agent LIKE 'sqlitebrowser %' AND http_user_agent NOT LIKE '%AppEngine%'
-			AND request_time > '2018-08-13 00:00 UTC'
-			AND request_time < '2018-08-14 00:00 UTC'`
-	rows, err := pg.Query(dbQuery)
+			AND request_time > $1
+			AND request_time < $2`
+	rows, err := pg.Query(dbQuery, &startDate, &endDate)
 	if err != nil {
 		log.Printf("Database query failed: %v\n", err)
 		return
@@ -182,20 +208,16 @@ func main() {
 	}
 
 	// Info while developing
-	log.Printf("Number of rows for 2018-08-13: %v\n", rowCount)
-	log.Printf("IP addresses for 2018-08-13: %v\n", len(uniqueIPs))
+	log.Printf("Number of rows for %v: %v\n", startDate, rowCount)
+	IPs = len(uniqueIPs)
 
 	// Number of unique IP addresses per user agent
+	userAgentIPs = make(map[string]int)
 	for i, j := range IPsPerUserAgent {
-		log.Printf("User agent: %v  Unique IP addresses: %v\n", i, len(j))
+		userAgentIPs[i] = len(j)
 	}
 
-	// * Weekly users *
-
-	// * Monthly users *
-
-	// Close the PG connection gracefully
-	pg.Close()
+	return
 }
 
 // initJaeger returns an instance of Jaeger Tracer
