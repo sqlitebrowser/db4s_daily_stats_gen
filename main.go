@@ -23,6 +23,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -121,6 +122,15 @@ func main() {
 	log.Printf("Connected to PostgreSQL server: %v:%v\n", Conf.Pg.Server, uint16(Conf.Pg.Port))
 	pgSpan.Finish()
 
+	// Add any new user agents to the db4s_release_info table
+	uaSpan := tracer.StartSpan("update user agents table")
+	defer uaSpan.Finish()
+	ctx := opentracing.ContextWithSpan(context.Background(), uaSpan)
+	err = updateUserAgents(ctx)
+	if err != nil {
+		log.Fatalf(err.Error())
+	}
+
 	// * Daily users *
 
 	// The earliest date with entries is 2018-08-13, so we start with that.  We repeatedly call the function for
@@ -130,7 +140,7 @@ func main() {
 	var numIPs int
 	var IPsPerUserAgent map[string]int
 	dailySpan := tracer.StartSpan("calculate daily users")
-	ctx := opentracing.ContextWithSpan(context.Background(), dailySpan)
+	ctx = opentracing.ContextWithSpan(context.Background(), dailySpan)
 	for endDate.Before(time.Now()) {
 		numIPs, _, err = getIPs(ctx, startDate, endDate)
 		//numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
@@ -177,8 +187,8 @@ func main() {
 	monthlySpan := tracer.StartSpan("calculate daily users")
 	ctx = opentracing.ContextWithSpan(context.Background(), monthlySpan)
 	for endDate.Before(time.Now()) {
-		numIPs, _, err = getIPs(ctx, startDate, endDate)
-		//numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
+		//numIPs, _, err = getIPs(ctx, startDate, endDate)
+		numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
 		startDate = startDate.AddDate(0, 1, 0)
 		endDate = startDate.AddDate(0, 1, 0)
 
@@ -200,7 +210,7 @@ func main() {
 // getIPs() returns the number of DB4S instances doing a version check in the given date range, plus a count of the
 // quantity per DB4S version
 func getIPs(ctx context.Context, startDate time.Time, endDate time.Time) (IPs int, userAgentIPs map[string]int, err error) {
-	span, _ := opentracing.StartSpanFromContext(ctx, "getIPs")
+	span, _ := opentracing.StartSpanFromContext(ctx, "get ips")
 	defer span.Finish()
 	span.SetTag("start date", startDate)
 	span.SetTag("end date", endDate)
@@ -289,4 +299,56 @@ func initJaeger(service string) (opentracing.Tracer, io.Closer) {
 		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
 	}
 	return tracer, closer
+}
+
+// updateUserAgents() retrieves the full list of user agents present in the daily request logs, then ensures there's an
+// entry for each one in the main stats processing reference table
+func updateUserAgents(ctx context.Context) error {
+	span, _ := opentracing.StartSpanFromContext(ctx, "update user agents")
+	defer span.Finish()
+
+	// Get list of all (valid) user agents in the logs.  The ORDER BY clause here gives an alphabetical sorting rather
+	// than numerical, but it'll do for now.
+	dbQuery := `
+		SELECT DISTINCT (http_user_agent)
+		FROM download_log
+		WHERE request = '/currentrelease'
+			AND http_user_agent LIKE 'sqlitebrowser %' AND http_user_agent NOT LIKE '%AppEngine%'
+		ORDER BY http_user_agent ASC`
+	rows, err := pg.Query(dbQuery)
+	if err != nil {
+		log.Printf("Database query failed: %v\n", err)
+		return err
+	}
+	defer rows.Close()
+	var userAgents []string
+	for rows.Next() {
+		var userAgent pgtype.Text
+		err = rows.Scan(&userAgent)
+		if err != nil {
+			log.Printf("Error retrieving rows: %v\n", err)
+			return err
+		}
+		if userAgent.Status == pgtype.Present {
+			v := strings.TrimPrefix(userAgent.String, "sqlitebrowser ")
+			userAgents = append(userAgents, v)
+		}
+	}
+
+	// Insert any missing user agents into the db4s_release_info table
+	for _, j := range userAgents {
+		dbQuery = `
+			INSERT INTO db4s_release_info (version_number)
+			VALUES ($1)`
+		commandTag, err := pg.Exec(dbQuery, j)
+		if err != nil {
+			// For now, don't bother logging a failure here.  This *might* need changing later on
+			return err
+		}
+		if numRows := commandTag.RowsAffected(); numRows != 1 {
+			log.Printf("Wrong number of rows (%v) affected when adding release: %v\n", numRows, j)
+		}
+	}
+
+	return nil
 }
