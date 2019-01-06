@@ -154,7 +154,7 @@ func main() {
 			log.Printf("Unique IP addresses for %v: %v\n", startDate.Format("2006 Jan 2"), numIPs)
 		}
 
-		// Save the daily stats to the db4s_stats_daily table
+		// Save daily stats
 		err = addDailyStats(startDate, numIPs, IPsPerUserAgent)
 		if err != nil {
 			log.Fatalf(err.Error())
@@ -163,46 +163,50 @@ func main() {
 	defer dailySpan.Finish()
 
 	// * Weekly users *
+	// TODO: Determine the "week of year" for 2018-08-13, and use that as the starting date for weekly stats instead
 	startDate = time.Date(2018, 8, 7, 0, 0, 0, 0, time.UTC)
 	endDate = startDate.AddDate(0, 0, 7)
 	weeklySpan := tracer.StartSpan("calculate daily users")
 	ctx = opentracing.ContextWithSpan(context.Background(), weeklySpan)
 	for endDate.Before(time.Now()) {
-		numIPs, _, err = getIPs(ctx, startDate, endDate)
-		//numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
+		numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
 		startDate = startDate.AddDate(0, 0, 7)
 		endDate = startDate.AddDate(0, 0, 7)
 
-		// Info while developing
-		yr, wk := startDate.ISOWeek()
-		log.Printf("Unique IP addresses for week %v, %v: %v\n", yr, wk, numIPs)
+		// Display debug info if appropriate
+		if debug {
+			yr, wk := startDate.ISOWeek()
+			log.Printf("Unique IP addresses for week %v, %v: %v\n", yr, wk, numIPs)
+		}
 
-		// Number of unique IP addresses per user agent
-		// TODO: Store the results back in the database
-		for i, j := range IPsPerUserAgent {
-			log.Printf("User agent: %v  Unique IP addresses: %v\n", i, j)
+		// Save weekly stats
+		err = addWeeklyStats(startDate, numIPs, IPsPerUserAgent)
+		if err != nil {
+			log.Fatalf(err.Error())
 		}
 	}
 	defer weeklySpan.Finish()
 
 	// * Monthly users *
+	// TODO: Figure out why 2018-09 is being skipped.  Seems like a logic bug, probably (hopefully) something simple.
 	startDate = time.Date(2018, 8, 0, 0, 0, 0, 0, time.UTC)
 	endDate = startDate.AddDate(0, 1, 0)
 	monthlySpan := tracer.StartSpan("calculate daily users")
 	ctx = opentracing.ContextWithSpan(context.Background(), monthlySpan)
 	for endDate.Before(time.Now()) {
-		//numIPs, _, err = getIPs(ctx, startDate, endDate)
 		numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
 		startDate = startDate.AddDate(0, 1, 0)
 		endDate = startDate.AddDate(0, 1, 0)
 
-		// Info while developing
-		log.Printf("Unique IP addresses for month %v: %v\n", startDate.Format("2006 Jan"), numIPs)
+		// Display debug info if appropriate
+		if debug {
+			log.Printf("Unique IP addresses for month %v: %v\n", startDate.Format("2006 Jan"), numIPs)
+		}
 
-		// Number of unique IP addresses per user agent
-		// TODO: Store the results back in the database
-		for i, j := range IPsPerUserAgent {
-			log.Printf("User agent: %v  Unique IP addresses: %v\n", i, j)
+		// Save monthly stats
+		err = addMonthlyStats(startDate, numIPs, IPsPerUserAgent)
+		if err != nil {
+			log.Fatalf(err.Error())
 		}
 	}
 	defer monthlySpan.Finish()
@@ -257,6 +261,108 @@ func addDailyStats(date time.Time, count int, IPsPerUserAgent map[string]int) er
 		}
 		if numRows := commandTag.RowsAffected(); numRows > 1 {
 			log.Printf("Wrong number of rows (%v) affected when adding a daily stats row: %v\n", numRows, date)
+		}
+	}
+	return nil
+}
+
+// addMonthlyStats() inserts new or updated weekly stats counts into the db4s_stats_monthly table
+func addMonthlyStats(date time.Time, count int, IPsPerUserAgent map[string]int) error {
+	// Update the non-version-specific monthly stats
+	// NOTE - The hard coded 1 value for the release version corresponds to the manually added "Unique IPs" entry in
+	// the release version table
+	dbQuery := `
+		INSERT INTO db4s_stats_monthly (stats_date, db4s_release, unique_ips)
+		VALUES ($1, 1, $2)
+		ON CONFLICT (stats_date, db4s_release)
+			DO UPDATE
+				SET unique_ips = $2
+				WHERE db4s_stats_monthly.stats_date = $1
+					AND db4s_stats_monthly.db4s_release IS NULL`
+	commandTag, err := pg.Exec(dbQuery, date, count)
+	if err != nil {
+		// For now, don't bother logging a failure here.  This *might* need changing later on
+		return err
+	}
+	if numRows := commandTag.RowsAffected(); numRows > 1 {
+		log.Printf("Wrong number of rows (%v) affected when adding a monthly stats row: %v\n", numRows, date)
+	}
+
+	// Update the version-specific monthly stats
+	for i, verCount := range IPsPerUserAgent {
+		// Strip the leading 'sqlitebrowser ' string from the version number
+		versionString := strings.TrimPrefix(i, "sqlitebrowser ")
+		dbQuery = `
+		WITH ver AS (
+			SELECT release_id
+			FROM db4s_release_info
+			WHERE version_number = $2
+		)
+		INSERT INTO db4s_stats_monthly (stats_date, db4s_release, unique_ips)
+		SELECT $1, (SELECT release_id FROM ver), $3
+		ON CONFLICT (stats_date, db4s_release)
+			DO UPDATE
+				SET unique_ips = $3
+				WHERE db4s_stats_monthly.stats_date = $1
+					AND db4s_stats_monthly.db4s_release = (SELECT release_id FROM ver)`
+		commandTag, err := pg.Exec(dbQuery, date, versionString, verCount)
+		if err != nil {
+			// For now, don't bother logging a failure here.  This *might* need changing later on
+			return err
+		}
+		if numRows := commandTag.RowsAffected(); numRows > 1 {
+			log.Printf("Wrong number of rows (%v) affected when adding a monthly stats row: %v\n", numRows, date)
+		}
+	}
+	return nil
+}
+
+// addWeeklyStats() inserts new or updated weekly stats counts into the db4s_stats_weekly table
+func addWeeklyStats(date time.Time, count int, IPsPerUserAgent map[string]int) error {
+	// Update the non-version-specific weekly stats
+	// NOTE - The hard coded 1 value for the release version corresponds to the manually added "Unique IPs" entry in
+	// the release version table
+	dbQuery := `
+		INSERT INTO db4s_stats_weekly (stats_date, db4s_release, unique_ips)
+		VALUES ($1, 1, $2)
+		ON CONFLICT (stats_date, db4s_release)
+			DO UPDATE
+				SET unique_ips = $2
+				WHERE db4s_stats_weekly.stats_date = $1
+					AND db4s_stats_weekly.db4s_release IS NULL`
+	commandTag, err := pg.Exec(dbQuery, date, count)
+	if err != nil {
+		// For now, don't bother logging a failure here.  This *might* need changing later on
+		return err
+	}
+	if numRows := commandTag.RowsAffected(); numRows > 1 {
+		log.Printf("Wrong number of rows (%v) affected when adding a weekly stats row: %v\n", numRows, date)
+	}
+
+	// Update the version-specific weekly stats
+	for i, verCount := range IPsPerUserAgent {
+		// Strip the leading 'sqlitebrowser ' string from the version number
+		versionString := strings.TrimPrefix(i, "sqlitebrowser ")
+		dbQuery = `
+		WITH ver AS (
+			SELECT release_id
+			FROM db4s_release_info
+			WHERE version_number = $2
+		)
+		INSERT INTO db4s_stats_weekly (stats_date, db4s_release, unique_ips)
+		SELECT $1, (SELECT release_id FROM ver), $3
+		ON CONFLICT (stats_date, db4s_release)
+			DO UPDATE
+				SET unique_ips = $3
+				WHERE db4s_stats_weekly.stats_date = $1
+					AND db4s_stats_weekly.db4s_release = (SELECT release_id FROM ver)`
+		commandTag, err := pg.Exec(dbQuery, date, versionString, verCount)
+		if err != nil {
+			// For now, don't bother logging a failure here.  This *might* need changing later on
+			return err
+		}
+		if numRows := commandTag.RowsAffected(); numRows > 1 {
+			log.Printf("Wrong number of rows (%v) affected when adding a weekly stats row: %v\n", numRows, date)
 		}
 	}
 	return nil
