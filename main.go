@@ -1,6 +1,6 @@
 package main
 
-// This generates basic status to answer two questions:
+// This generates basic stats to answer two questions:
 //
 //   1) How many DB4S clients (unique ip address) are checking the '/currentrelease' version each day?
 //
