@@ -157,11 +157,18 @@ func main() {
 	dailySpan.Finish()
 
 	// * Weekly users *
-	// TODO: Determine the "week of year" for 2018-08-13, and use that as the starting date for weekly stats instead
-	startDate = time.Date(2018, 8, 7, 0, 0, 0, 0, time.UTC)
+
+	// Determine the "week of year" for 2018-08-13 (the first day with data), and use that as the starting date for
+	// weekly stats
+	_, wk := time.Date(2018, 8, 13, 0, 0, 0, 0, time.UTC).ISOWeek()
+	startDate = time.Date(2018, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, w := startDate.ISOWeek(); w < wk; {
+		startDate = startDate.AddDate(0, 0, 7)
+		_, w = startDate.ISOWeek()
+	}
 	endDate = startDate.AddDate(0, 0, 7)
 	wkSpan := tracer.StartSpan("calculate weekly users")
-	for endDate.Before(time.Now()) {
+	for endDate.Before(time.Now().AddDate(0, 0, 7)) {
 		numIPs, IPsPerUserAgent, err := getIPs(startDate, endDate)
 		err = saveWeeklyStats(startDate, numIPs, IPsPerUserAgent)
 		if err != nil {
@@ -302,7 +309,7 @@ func initJaeger(service string) (opentracing.Tracer, io.Closer) {
 func saveDailyStats(date time.Time, count int, IPsPerUserAgent map[string]int) error {
 	// Update the non-version-specific daily stats
 	// NOTE - The hard coded 1 value for the release version corresponds to the manually added "Unique IPs" entry in
-	// the release version table
+	// the DB4S release info table
 	dbQuery := `
 		INSERT INTO db4s_stats_daily (stats_date, db4s_release, unique_ips)
 		VALUES ($1, 1, $2)
