@@ -145,8 +145,7 @@ func main() {
 	dailySpan := tracer.StartSpan("calculate daily users")
 	ctx = opentracing.ContextWithSpan(context.Background(), dailySpan)
 	for endDate.Before(time.Now()) {
-		numIPs, _, err = getIPs(ctx, startDate, endDate)
-		//numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
+		numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
 		startDate = startDate.AddDate(0, 0, 1)
 		endDate = startDate.AddDate(0, 0, 1)
 
@@ -155,17 +154,11 @@ func main() {
 			log.Printf("Unique IP addresses for %v: %v\n", startDate.Format("2006 Jan 2"), numIPs)
 		}
 
-		// Save the # of unique IP address to the db4s_stats_daily table
-		err = addDailyStats(startDate, numIPs)
+		// Save the daily stats to the db4s_stats_daily table
+		err = addDailyStats(startDate, numIPs, IPsPerUserAgent)
 		if err != nil {
 			log.Fatalf(err.Error())
 		}
-
-		// Number of unique IP addresses per user agent
-		// TODO: Store the results back in the database
-		//for i, j := range IPsPerUserAgent {
-		//	log.Printf("User agent: %v  Unique IP addresses: %v\n", i, j)
-		//}
 	}
 	defer dailySpan.Finish()
 
@@ -219,19 +212,52 @@ func main() {
 }
 
 // addDailyStats() inserts new or updated daily stats counts into the db4s_stats_daily table
-func addDailyStats(date time.Time, count int) error {
+func addDailyStats(date time.Time, count int, IPsPerUserAgent map[string]int) error {
+	// Update the non-version-specific daily stats
+	// NOTE - The hard coded 1 value for the release version corresponds to the manually added "Unique IPs" entry in
+	// the release version table
 	dbQuery := `
-		INSERT INTO db4s_stats_daily (stats_date, unique_ips)
-		VALUES ($1, $2)`
-	// TODO: It would probably be useful to add an ON CONFLICT statement here, so the stats for the latest days can be
-	//       updated easily in this same function
+		INSERT INTO db4s_stats_daily (stats_date, db4s_release, unique_ips)
+		VALUES ($1, 1, $2)
+		ON CONFLICT (stats_date, db4s_release)
+			DO UPDATE
+				SET unique_ips = $2
+				WHERE db4s_stats_daily.stats_date = $1
+					AND db4s_stats_daily.db4s_release IS NULL`
 	commandTag, err := pg.Exec(dbQuery, date, count)
 	if err != nil {
 		// For now, don't bother logging a failure here.  This *might* need changing later on
 		return err
 	}
-	if numRows := commandTag.RowsAffected(); numRows != 1 {
+	if numRows := commandTag.RowsAffected(); numRows > 1 {
 		log.Printf("Wrong number of rows (%v) affected when adding a daily stats row: %v\n", numRows, date)
+	}
+
+	// Update the version-specific daily stats
+	for i, verCount := range IPsPerUserAgent {
+		// Strip the leading 'sqlitebrowser ' string from the version number
+		versionString := strings.TrimPrefix(i, "sqlitebrowser ")
+		dbQuery = `
+		WITH ver AS (
+			SELECT release_id
+			FROM db4s_release_info
+			WHERE version_number = $2
+		)
+		INSERT INTO db4s_stats_daily (stats_date, db4s_release, unique_ips)
+		SELECT $1, (SELECT release_id FROM ver), $3
+		ON CONFLICT (stats_date, db4s_release)
+			DO UPDATE
+				SET unique_ips = $3
+				WHERE db4s_stats_daily.stats_date = $1
+					AND db4s_stats_daily.db4s_release = (SELECT release_id FROM ver)`
+		commandTag, err := pg.Exec(dbQuery, date, versionString, verCount)
+		if err != nil {
+			// For now, don't bother logging a failure here.  This *might* need changing later on
+			return err
+		}
+		if numRows := commandTag.RowsAffected(); numRows > 1 {
+			log.Printf("Wrong number of rows (%v) affected when adding a daily stats row: %v\n", numRows, date)
+		}
 	}
 	return nil
 }
