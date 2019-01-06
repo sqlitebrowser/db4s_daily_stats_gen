@@ -63,8 +63,8 @@ var (
 	// PostgreSQL Connection pool
 	pg *pgx.ConnPool
 
-	// Jaeger connection
-	tracer opentracing.Tracer
+	// Use Jaeger?
+	enableJaeger = false
 )
 
 func main() {
@@ -90,13 +90,11 @@ func main() {
 	}
 
 	// Set up initial Jaeger service and span
-	var closer io.Closer
-	tracer, closer = initJaeger("db4s stats generator")
+	tracer, closer := initJaeger("db4s stats generator")
 	defer closer.Close()
 	opentracing.SetGlobalTracer(tracer)
 
 	// * Connect to PG database *
-
 	pgSpan := tracer.StartSpan("connect postgres")
 
 	// Setup the PostgreSQL config
@@ -126,13 +124,13 @@ func main() {
 	pgSpan.Finish()
 
 	// Add any new user agents to the db4s_release_info table
-	uaSpan := tracer.StartSpan("update user agents table")
-	defer uaSpan.Finish()
-	ctx := opentracing.ContextWithSpan(context.Background(), uaSpan)
-	err = updateUserAgents(ctx)
+	uaSpan := tracer.StartSpan("update user agents")
+	uaCtx := opentracing.ContextWithSpan(context.Background(), uaSpan)
+	err = updateUserAgents(uaCtx)
 	if err != nil {
 		log.Fatalf(err.Error())
 	}
+	uaSpan.Finish()
 
 	// * Daily users *
 
@@ -140,12 +138,9 @@ func main() {
 	// getting IP addresses, incrementing the date each time until we exceed time.Now()
 	startDate := time.Date(2018, 8, 13, 0, 0, 0, 0, time.UTC)
 	endDate := startDate.Add(time.Hour * 24)
-	var numIPs int
-	var IPsPerUserAgent map[string]int
 	dailySpan := tracer.StartSpan("calculate daily users")
-	ctx = opentracing.ContextWithSpan(context.Background(), dailySpan)
 	for endDate.Before(time.Now()) {
-		numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
+		numIPs, IPsPerUserAgent, err := getIPs(startDate, endDate)
 		startDate = startDate.AddDate(0, 0, 1)
 		endDate = startDate.AddDate(0, 0, 1)
 
@@ -160,16 +155,15 @@ func main() {
 			log.Fatalf(err.Error())
 		}
 	}
-	defer dailySpan.Finish()
+	dailySpan.Finish()
 
 	// * Weekly users *
 	// TODO: Determine the "week of year" for 2018-08-13, and use that as the starting date for weekly stats instead
 	startDate = time.Date(2018, 8, 7, 0, 0, 0, 0, time.UTC)
 	endDate = startDate.AddDate(0, 0, 7)
-	weeklySpan := tracer.StartSpan("calculate daily users")
-	ctx = opentracing.ContextWithSpan(context.Background(), weeklySpan)
+	wkSpan := tracer.StartSpan("calculate weekly users")
 	for endDate.Before(time.Now()) {
-		numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
+		numIPs, IPsPerUserAgent, err := getIPs(startDate, endDate)
 		startDate = startDate.AddDate(0, 0, 7)
 		endDate = startDate.AddDate(0, 0, 7)
 
@@ -185,16 +179,15 @@ func main() {
 			log.Fatalf(err.Error())
 		}
 	}
-	defer weeklySpan.Finish()
+	wkSpan.Finish()
 
 	// * Monthly users *
 	// TODO: Figure out why 2018-09 is being skipped.  Seems like a logic bug, probably (hopefully) something simple.
 	startDate = time.Date(2018, 8, 0, 0, 0, 0, 0, time.UTC)
 	endDate = startDate.AddDate(0, 1, 0)
-	monthlySpan := tracer.StartSpan("calculate daily users")
-	ctx = opentracing.ContextWithSpan(context.Background(), monthlySpan)
+	mthSpan := tracer.StartSpan("calculate monthly users")
 	for endDate.Before(time.Now()) {
-		numIPs, IPsPerUserAgent, err = getIPs(ctx, startDate, endDate)
+		numIPs, IPsPerUserAgent, err := getIPs(startDate, endDate)
 		startDate = startDate.AddDate(0, 1, 0)
 		endDate = startDate.AddDate(0, 1, 0)
 
@@ -209,10 +202,11 @@ func main() {
 			log.Fatalf(err.Error())
 		}
 	}
-	defer monthlySpan.Finish()
+	mthSpan.Finish()
 
 	// Close the PG connection gracefully
 	pg.Close()
+	log.Println("Done")
 }
 
 // addDailyStats() inserts new or updated daily stats counts into the db4s_stats_daily table
@@ -370,12 +364,7 @@ func addWeeklyStats(date time.Time, count int, IPsPerUserAgent map[string]int) e
 
 // getIPs() returns the number of DB4S instances doing a version check in the given date range, plus a count of the
 // quantity per DB4S version
-func getIPs(ctx context.Context, startDate time.Time, endDate time.Time) (IPs int, userAgentIPs map[string]int, err error) {
-	span, _ := opentracing.StartSpanFromContext(ctx, "get ips")
-	defer span.Finish()
-	span.SetTag("start date", startDate)
-	span.SetTag("end date", endDate)
-
+func getIPs(startDate time.Time, endDate time.Time) (IPs int, userAgentIPs map[string]int, err error) {
 	// This nested map approach (inside of a combined key) should allow for counting the # of unique IP's per user agent
 	IPsPerUserAgent := make(map[string]map[[16]byte]int)
 
@@ -445,11 +434,15 @@ func getIPs(ctx context.Context, startDate time.Time, endDate time.Time) (IPs in
 
 // initJaeger returns an instance of Jaeger Tracer
 func initJaeger(service string) (opentracing.Tracer, io.Closer) {
+	samplerConst := 1.0
+	if !enableJaeger {
+		samplerConst = 0.0
+	}
 	cfg := &config.Configuration{
 		ServiceName: service,
 		Sampler: &config.SamplerConfig{
 			Type:  "const",
-			Param: 1,
+			Param: samplerConst,
 		},
 		Reporter: &config.ReporterConfig{
 			CollectorEndpoint: Conf.Jaeger.CollectorEndPoint,
