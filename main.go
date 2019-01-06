@@ -10,6 +10,11 @@ package main
 //
 //      This should give us a rough idea of the mix of versions being used
 
+// In the default mode (with no command line arguments), this will process all entries from the first day (2018-08-13)
+// onwards.  In "daily" mode (enabled by "-d" on the command line), this only processes entries for the current time
+// period and the time period immediately preceding it.  eg today and yesterday, this week and last week, this month
+// and last month
+
 // NOTE: While much of this processing could instead be done using SQL directly in PG, it's not worth the time for
 //       me to learn/refresh my knowledge of the appropriate PG bits at this point.  So, just going to do it using
 //       Go instead, even though it's less efficient processing-wise. ;)
@@ -57,8 +62,11 @@ var (
 	// Application config
 	Conf TomlConfig
 
+	// Is this being run in daily/hourly mode from cron (or similar)?
+	dailyMode = false
+
 	// Toggle for display of debugging info
-	debug = true
+	debug = false
 
 	// PostgreSQL Connection pool
 	pg *pgx.ConnPool
@@ -87,6 +95,14 @@ func main() {
 	// Read our configuration settings
 	if _, err = toml.DecodeFile(configFile, &Conf); err != nil {
 		log.Fatal(err)
+	}
+
+	// If a command line argument of "-d" was given (the only thing we check for), then enable "daily" mode
+	if len(os.Args) > 1 && os.Args[1] == "-d" {
+		dailyMode = true
+		if debug {
+			log.Println("Running in daily mode")
+		}
 	}
 
 	// Set up initial Jaeger service and span
@@ -119,8 +135,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Log successful connection
-	log.Printf("Connected to PostgreSQL server: %v:%v\n", Conf.Pg.Server, uint16(Conf.Pg.Port))
+	// Log successful connection if appropriate
+	if debug {
+		log.Printf("Connected to PostgreSQL server: %v:%v\n", Conf.Pg.Server, uint16(Conf.Pg.Port))
+	}
 	pgSpan.Finish()
 
 	// Add any new user agents to the db4s_release_info table
@@ -134,12 +152,23 @@ func main() {
 
 	// * Daily users *
 
-	// The earliest date with entries is 2018-08-13, so we start with that.  We repeatedly call the function for
-	// getting IP addresses, incrementing the date each time until we exceed time.Now()
-	startDate := time.Date(2018, 8, 13, 0, 0, 0, 0, time.UTC)
+	var startDate time.Time
+	if dailyMode {
+		// We're running in daily mode, so we start with yesterday's date and then proceed through to today
+		now := time.Now()
+		yr := now.Year()
+		mth := now.Month()
+		day := now.Day()
+		today := time.Date(yr, mth, day, 0, 0, 0, 0, time.UTC)
+		startDate = today.AddDate(0, 0, -1)
+	} else {
+		// The earliest date with entries is 2018-08-13, so we start with that.  We repeatedly call the function for
+		// getting IP addresses, incrementing the date each time until we exceed time.Now()
+		startDate = time.Date(2018, 8, 13, 0, 0, 0, 0, time.UTC)
+	}
 	endDate := startDate.Add(time.Hour * 24)
 	dailySpan := tracer.StartSpan("calculate daily users")
-	for endDate.Before(time.Now()) {
+	for endDate.Before(time.Now().AddDate(0, 0, 1)) {
 		numIPs, IPsPerUserAgent, err := getIPs(startDate, endDate)
 		err = saveDailyStats(startDate, numIPs, IPsPerUserAgent)
 		if err != nil {
@@ -158,13 +187,33 @@ func main() {
 
 	// * Weekly users *
 
-	// Determine the "week of year" for 2018-08-13 (the first day with data), and use that as the starting date for
-	// weekly stats
-	_, wk := time.Date(2018, 8, 13, 0, 0, 0, 0, time.UTC).ISOWeek()
-	startDate = time.Date(2018, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, w := startDate.ISOWeek(); w < wk; {
-		startDate = startDate.AddDate(0, 0, 7)
-		_, w = startDate.ISOWeek()
+	var wk int
+	if dailyMode {
+		// * Running in daily mode, so we just need to process the last two weeks of entries *
+
+		// Determine which week we're in from 2018-01-01, with that being week #1.  For reference, 2018-08-13 is week #33
+		now := time.Now()
+		date := time.Date(2018, 1, 1, 0, 0, 0, 0, time.UTC)
+		count := 1
+		for date.Before(now) {
+			date = date.AddDate(0, 0, 7) // Add a week
+			count++
+		}
+
+		// Wind the start date back two weeks, just to ensure we have complete coverage
+		startDate = date.AddDate(0, 0, -14)
+
+	} else {
+		// Not running in daily mode, so we process all the entries in the database
+
+		// Determine the "week of year" for 2018-08-13 (the first day with data), and use that as the starting date for
+		// weekly stats.  Reference note, it should be week 33. ;)
+		_, wk = time.Date(2018, 8, 13, 0, 0, 0, 0, time.UTC).ISOWeek()
+		startDate = time.Date(2018, 1, 1, 0, 0, 0, 0, time.UTC)
+		for _, w := startDate.ISOWeek(); w < wk; {
+			startDate = startDate.AddDate(0, 0, 7)
+			_, w = startDate.ISOWeek()
+		}
 	}
 	endDate = startDate.AddDate(0, 0, 7)
 	wkSpan := tracer.StartSpan("calculate weekly users")
@@ -187,7 +236,18 @@ func main() {
 	wkSpan.Finish()
 
 	// * Monthly users *
-	startDate = time.Date(2018, 8, 1, 0, 0, 0, 0, time.UTC)
+
+	if dailyMode {
+		// We're running in daily mode, so the start date is the 1st day of last month
+		now := time.Now()
+		yr := now.Year()
+		mth := now.Month()
+		thisMonth := time.Date(yr, mth, 1, 0, 0, 0, 0, time.UTC) // First date of this month
+		startDate = thisMonth.AddDate(0, -1, 0)                  // Wind the start date back one month
+	} else {
+		// We're not running in daily mode, so we start at the beginning of the data
+		startDate = time.Date(2018, 8, 1, 0, 0, 0, 0, time.UTC)
+	}
 	endDate = startDate.AddDate(0, 1, 0)
 	mthSpan := tracer.StartSpan("calculate monthly users")
 	for endDate.Before(time.Now().AddDate(0, 1, 0)) {
@@ -209,7 +269,11 @@ func main() {
 
 	// Close the PG connection gracefully
 	pg.Close()
-	log.Println("Done")
+
+	// Display debug info if appropriate
+	if debug {
+		log.Println("Done")
+	}
 }
 
 // getIPs() returns the number of DB4S instances doing a version check in the given date range, plus a count of the
@@ -464,7 +528,9 @@ func updateUserAgents(ctx context.Context) error {
 	span, _ := opentracing.StartSpanFromContext(ctx, "update user agents")
 	defer span.Finish()
 
-	log.Printf("Updating DB4S user agents list in the database...")
+	if debug {
+		log.Printf("Updating DB4S user agents list in the database...")
+	}
 
 	// Get list of all (valid) user agents in the logs.  The ORDER BY clause here gives an alphabetical sorting rather
 	// than numerical, but it'll do for now.
