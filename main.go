@@ -378,13 +378,13 @@ func saveDailyStats(date time.Time, count int, IPsPerUserAgent map[string]int) e
 			DO UPDATE
 				SET unique_ips = $2
 				WHERE db4s_stats_daily.stats_date = $1
-					AND db4s_stats_daily.db4s_release IS NULL`
+					AND db4s_stats_daily.db4s_release = 1`
 	commandTag, err := pg.Exec(dbQuery, date, count)
 	if err != nil {
 		// For now, don't bother logging a failure here.  This *might* need changing later on
 		return err
 	}
-	if numRows := commandTag.RowsAffected(); numRows > 1 {
+	if numRows := commandTag.RowsAffected(); numRows != 1 {
 		log.Printf("Wrong number of rows (%v) affected when adding a daily stats row: %v\n", numRows, date)
 	}
 
@@ -429,13 +429,13 @@ func saveMonthlyStats(date time.Time, count int, IPsPerUserAgent map[string]int)
 			DO UPDATE
 				SET unique_ips = $2
 				WHERE db4s_stats_monthly.stats_date = $1
-					AND db4s_stats_monthly.db4s_release IS NULL`
+					AND db4s_stats_monthly.db4s_release = 1`
 	commandTag, err := pg.Exec(dbQuery, date, count)
 	if err != nil {
 		// For now, don't bother logging a failure here.  This *might* need changing later on
 		return err
 	}
-	if numRows := commandTag.RowsAffected(); numRows > 1 {
+	if numRows := commandTag.RowsAffected(); numRows != 1 {
 		log.Printf("Wrong number of rows (%v) affected when adding a monthly stats row: %v\n", numRows, date)
 	}
 
@@ -480,13 +480,13 @@ func saveWeeklyStats(date time.Time, count int, IPsPerUserAgent map[string]int) 
 			DO UPDATE
 				SET unique_ips = $2
 				WHERE db4s_stats_weekly.stats_date = $1
-					AND db4s_stats_weekly.db4s_release IS NULL`
+					AND db4s_stats_weekly.db4s_release = 1`
 	commandTag, err := pg.Exec(dbQuery, date, count)
 	if err != nil {
 		// For now, don't bother logging a failure here.  This *might* need changing later on
 		return err
 	}
-	if numRows := commandTag.RowsAffected(); numRows > 1 {
+	if numRows := commandTag.RowsAffected(); numRows != 1 {
 		log.Printf("Wrong number of rows (%v) affected when adding a weekly stats row: %v\n", numRows, date)
 	}
 
