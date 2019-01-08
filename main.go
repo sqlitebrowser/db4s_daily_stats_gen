@@ -167,7 +167,10 @@ func main() {
 	dailySpan := tracer.StartSpan("calculate daily users")
 	for endDate.Before(time.Now().AddDate(0, 0, 1)) {
 		numIPs, IPsPerUserAgent, err := getIPs(startDate, endDate)
-		err = saveDailyStats(startDate, numIPs, IPsPerUserAgent)
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+		err = saveDailyUsersStats(startDate, numIPs, IPsPerUserAgent)
 		if err != nil {
 			log.Fatalf(err.Error())
 		}
@@ -216,7 +219,10 @@ func main() {
 	wkSpan := tracer.StartSpan("calculate weekly users")
 	for endDate.Before(time.Now().AddDate(0, 0, 7)) {
 		numIPs, IPsPerUserAgent, err := getIPs(startDate, endDate)
-		err = saveWeeklyStats(startDate, numIPs, IPsPerUserAgent)
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+		err = saveWeeklyUsersStats(startDate, numIPs, IPsPerUserAgent)
 		if err != nil {
 			log.Fatalf(err.Error())
 		}
@@ -249,7 +255,10 @@ func main() {
 	mthSpan := tracer.StartSpan("calculate monthly users")
 	for endDate.Before(time.Now().AddDate(0, 1, 0)) {
 		numIPs, IPsPerUserAgent, err := getIPs(startDate, endDate)
-		err = saveMonthlyStats(startDate, numIPs, IPsPerUserAgent)
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+		err = saveMonthlyUsersStats(startDate, numIPs, IPsPerUserAgent)
 		if err != nil {
 			log.Fatalf(err.Error())
 		}
@@ -264,6 +273,130 @@ func main() {
 	}
 	mthSpan.Finish()
 
+	// * Daily downloads *
+
+	if dailyMode {
+		// We're running in daily mode, so we start with yesterday's date and then proceed through to today
+		now := time.Now()
+		yr := now.Year()
+		mth := now.Month()
+		day := now.Day()
+		today := time.Date(yr, mth, day, 0, 0, 0, 0, time.UTC)
+		startDate = today.AddDate(0, 0, -1)
+	} else {
+		// The earliest date with entries is 2018-08-09, so we start with that.  We repeatedly call the function for
+		// getting IP addresses, incrementing the date each time until we exceed time.Now()
+		startDate = time.Date(2018, 8, 9, 0, 0, 0, 0, time.UTC)
+	}
+	endDate = startDate.Add(time.Hour * 24)
+	dailyDLSpan := tracer.StartSpan("calculate daily downloads")
+	for endDate.Before(time.Now().AddDate(0, 0, 1)) {
+		numDLs, DLsPerVersion, err := getDownloads(startDate, endDate)
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+		err = saveDailyDownloadsStats(startDate, numDLs, DLsPerVersion)
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+
+		// Display debug info if appropriate
+		if debug {
+			log.Printf("Downloads for %v: %v\n", startDate.Format("2006 Jan 2"), numDLs)
+		}
+
+		startDate = startDate.AddDate(0, 0, 1)
+		endDate = startDate.AddDate(0, 0, 1)
+	}
+	dailyDLSpan.Finish()
+
+	// * Weekly downloads *
+
+	if dailyMode {
+		// * Running in daily mode, so we just need to process the last two weeks of entries *
+
+		// Determine which week we're in from 2018-01-01, with that being week #1.  For reference, 2018-08-13 is week #33
+		now := time.Now()
+		date := time.Date(2018, 1, 1, 0, 0, 0, 0, time.UTC)
+		count := 1
+		for date.Before(now) {
+			date = date.AddDate(0, 0, 7) // Add a week
+			count++
+		}
+
+		// Wind the start date back two weeks, just to ensure we have complete coverage
+		startDate = date.AddDate(0, 0, -14)
+
+	} else {
+		// Not running in daily mode, so we process all the entries in the database
+
+		// Determine the "week of year" for 2018-08-09 (the first day with data), and use that as the starting date for
+		// weekly stats.  Reference note, it should be week 32. ;)
+		_, wk = time.Date(2018, 8, 9, 0, 0, 0, 0, time.UTC).ISOWeek()
+		startDate = time.Date(2018, 1, 1, 0, 0, 0, 0, time.UTC)
+		for _, w := startDate.ISOWeek(); w < wk; {
+			startDate = startDate.AddDate(0, 0, 7)
+			_, w = startDate.ISOWeek()
+		}
+	}
+	endDate = startDate.AddDate(0, 0, 7)
+	wkDLSpan := tracer.StartSpan("calculate weekly downloads")
+	for endDate.Before(time.Now().AddDate(0, 0, 7)) {
+		numDLs, DLsPerVersion, err := getDownloads(startDate, endDate)
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+		err = saveWeeklyDownloadsStats(startDate, numDLs, DLsPerVersion)
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+
+		// Display debug info if appropriate
+		if debug {
+			yr, wk := startDate.ISOWeek()
+			log.Printf("Downloads for week %v, %v: %v\n", yr, wk, numDLs)
+		}
+
+		startDate = startDate.AddDate(0, 0, 7)
+		endDate = startDate.AddDate(0, 0, 7)
+	}
+	wkDLSpan.Finish()
+
+	// * Monthly downloads *
+
+	if dailyMode {
+		// We're running in daily mode, so the start date is the 1st day of last month
+		now := time.Now()
+		yr := now.Year()
+		mth := now.Month()
+		thisMonth := time.Date(yr, mth, 1, 0, 0, 0, 0, time.UTC) // First date of this month
+		startDate = thisMonth.AddDate(0, -1, 0)                  // Wind the start date back one month
+	} else {
+		// We're not running in daily mode, so we start at the beginning of the data
+		startDate = time.Date(2018, 8, 1, 0, 0, 0, 0, time.UTC)
+	}
+	endDate = startDate.AddDate(0, 1, 0)
+	mthDLSpan := tracer.StartSpan("calculate monthly downloads")
+	for endDate.Before(time.Now().AddDate(0, 1, 0)) {
+		numDLs, DLsPerVersion, err := getDownloads(startDate, endDate)
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+		err = saveMonthlyDownloadsStats(startDate, numDLs, DLsPerVersion)
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+
+		// Display debug info if appropriate
+		if debug {
+			log.Printf("Downloads for month %v: %v\n", startDate.Format("2006 Jan"), numDLs)
+		}
+
+		startDate = startDate.AddDate(0, 1, 0)
+		endDate = startDate.AddDate(0, 1, 0)
+	}
+	mthDLSpan.Finish()
+
 	// Close the PG connection gracefully
 	pg.Close()
 
@@ -271,6 +404,78 @@ func main() {
 	if debug {
 		log.Println("Done")
 	}
+}
+
+// getDownloads() returns the total number of DB4S downloads in the given date range, plus a breakdown per DB4S version
+func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVersion map[int]int32, err error) {
+	// Retrieve count of all valid download requests for the desired time range
+	DLsPerVersion = make(map[int]int32)
+	dbQuery := `
+		SELECT count(*)
+		FROM download_log
+		WHERE (request = '/DB.Browser.for.SQLite-3.10.1.dmg'
+			OR request = '/DB.Browser.for.SQLite-3.10.1-win32.exe'
+			OR request = '/DB.Browser.for.SQLite-3.10.1-win64.exe'
+			OR request = '/SQLiteDatabaseBrowserPortable_3.10.1_English.paf.exe')
+			AND request_time > $1
+			AND request_time < $2`
+	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&DLs)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+
+	// Retrieve counts specific downloads for the desired time range
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-3.10.1.dmg'
+			AND request_time > $1
+			AND request_time < $2`
+	var a int32
+	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[1] = a // 1 is "3.10.1 macOS" (as per the db4s_download_info table
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-3.10.1-win32.exe'
+			AND request_time > $1
+			AND request_time < $2`
+	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[2] = a // 2 is "3.10.1 win32" (as per the db4s_download_info table
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-3.10.1-win64.exe'
+			AND request_time > $1
+			AND request_time < $2`
+	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[3] = a // 3 is "3.10.1 win64" (as per the db4s_download_info table
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/SQLiteDatabaseBrowserPortable_3.10.1_English.paf.exe'
+			AND request_time > $1
+			AND request_time < $2`
+	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[4] = a // 4 is "3.10.1 Portable" (as per the db4s_download_info table
+	return
 }
 
 // getIPs() returns the number of DB4S instances doing a version check in the given date range, plus a count of the
@@ -366,8 +571,52 @@ func initJaeger(service string) (opentracing.Tracer, io.Closer) {
 	return tracer, closer
 }
 
-// saveDailyStats() inserts new or updated daily stats counts into the db4s_users_daily table
-func saveDailyStats(date time.Time, count int, IPsPerUserAgent map[string]int) error {
+// saveDailyDownloadsStats() inserts new or updated daily download stats counts into the db4s_downloads_daily table
+func saveDailyDownloadsStats(date time.Time, count int32, DLsPerVersion map[int]int32) error {
+	// Update the non-version-specific daily stats
+	// NOTE - The hard coded 0 value for the db4s download corresponds to the manually added "Total downloads" entry in
+	// the DB4S download info table
+	dbQuery := `
+		INSERT INTO db4s_downloads_daily (stats_date, db4s_download, num_downloads)
+		VALUES ($1, 0, $2)
+		ON CONFLICT (stats_date, db4s_download)
+			DO UPDATE
+				SET num_downloads = $2
+				WHERE db4s_downloads_daily.stats_date = $1
+					AND db4s_downloads_daily.db4s_download = 0`
+	commandTag, err := pg.Exec(dbQuery, date, count)
+	if err != nil {
+		// For now, don't bother logging a failure here.  This *might* need changing later on
+		return err
+	}
+	if numRows := commandTag.RowsAffected(); numRows != 1 {
+		log.Printf("Wrong number of rows (%v) affected when adding a daily download stats row: %v\n", numRows, date)
+	}
+
+	// Update the version-specific daily download stats
+	for version, DLCount := range DLsPerVersion {
+		dbQuery = `
+		INSERT INTO db4s_downloads_daily (stats_date, db4s_download, num_downloads)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (stats_date, db4s_download)
+			DO UPDATE
+				SET num_downloads = $3
+				WHERE db4s_downloads_daily.stats_date = $1
+					AND db4s_downloads_daily.db4s_download = $2`
+		commandTag, err := pg.Exec(dbQuery, date, version, DLCount)
+		if err != nil {
+			// For now, don't bother logging a failure here.  This *might* need changing later on
+			return err
+		}
+		if numRows := commandTag.RowsAffected(); numRows > 1 {
+			log.Printf("Wrong number of rows (%v) affected when adding a daily download stats row: %v\n", numRows, date)
+		}
+	}
+	return nil
+}
+
+// saveDailyUsersStats() inserts new or updated daily stats counts into the db4s_users_daily table
+func saveDailyUsersStats(date time.Time, count int, IPsPerUserAgent map[string]int) error {
 	// Update the non-version-specific daily stats
 	// NOTE - The hard coded 1 value for the release version corresponds to the manually added "Unique IPs" entry in
 	// the DB4S release info table
@@ -417,8 +666,52 @@ func saveDailyStats(date time.Time, count int, IPsPerUserAgent map[string]int) e
 	return nil
 }
 
-// saveMonthlyStats() inserts new or updated weekly stats counts into the db4s_users_monthly table
-func saveMonthlyStats(date time.Time, count int, IPsPerUserAgent map[string]int) error {
+// saveMonthlyDownloadsStats() inserts new or updated monthly download stats counts into the db4s_downloads_monthly table
+func saveMonthlyDownloadsStats(date time.Time, count int32, DLsPerVersion map[int]int32) error {
+	// Update the non-version-specific monthly stats
+	// NOTE - The hard coded 0 value for the db4s download corresponds to the manually added "Total downloads" entry in
+	// the DB4S download info table
+	dbQuery := `
+		INSERT INTO db4s_downloads_monthly (stats_date, db4s_download, num_downloads)
+		VALUES ($1, 0, $2)
+		ON CONFLICT (stats_date, db4s_download)
+			DO UPDATE
+				SET num_downloads = $2
+				WHERE db4s_downloads_monthly.stats_date = $1
+					AND db4s_downloads_monthly.db4s_download = 0`
+	commandTag, err := pg.Exec(dbQuery, date, count)
+	if err != nil {
+		// For now, don't bother logging a failure here.  This *might* need changing later on
+		return err
+	}
+	if numRows := commandTag.RowsAffected(); numRows != 1 {
+		log.Printf("Wrong number of rows (%v) affected when adding a monthly download stats row: %v\n", numRows, date)
+	}
+
+	// Update the version-specific monthly download stats
+	for version, DLCount := range DLsPerVersion {
+		dbQuery = `
+		INSERT INTO db4s_downloads_monthly (stats_date, db4s_download, num_downloads)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (stats_date, db4s_download)
+			DO UPDATE
+				SET num_downloads = $3
+				WHERE db4s_downloads_monthly.stats_date = $1
+					AND db4s_downloads_monthly.db4s_download = $2`
+		commandTag, err := pg.Exec(dbQuery, date, version, DLCount)
+		if err != nil {
+			// For now, don't bother logging a failure here.  This *might* need changing later on
+			return err
+		}
+		if numRows := commandTag.RowsAffected(); numRows > 1 {
+			log.Printf("Wrong number of rows (%v) affected when adding a monthly download stats row: %v\n", numRows, date)
+		}
+	}
+	return nil
+}
+
+// saveMonthlyUsersStats() inserts new or updated weekly stats counts into the db4s_users_monthly table
+func saveMonthlyUsersStats(date time.Time, count int, IPsPerUserAgent map[string]int) error {
 	// Update the non-version-specific monthly stats
 	// NOTE - The hard coded 1 value for the release version corresponds to the manually added "Unique IPs" entry in
 	// the release version table
@@ -468,8 +761,52 @@ func saveMonthlyStats(date time.Time, count int, IPsPerUserAgent map[string]int)
 	return nil
 }
 
-// saveWeeklyStats() inserts new or updated weekly stats counts into the db4s_users_weekly table
-func saveWeeklyStats(date time.Time, count int, IPsPerUserAgent map[string]int) error {
+// saveWeeklyDownloadsStats() inserts new or updated weekly download stats counts into the db4s_downloads_weekly table
+func saveWeeklyDownloadsStats(date time.Time, count int32, DLsPerVersion map[int]int32) error {
+	// Update the non-version-specific weekly stats
+	// NOTE - The hard coded 0 value for the db4s download corresponds to the manually added "Total downloads" entry in
+	// the DB4S download info table
+	dbQuery := `
+		INSERT INTO db4s_downloads_weekly (stats_date, db4s_download, num_downloads)
+		VALUES ($1, 0, $2)
+		ON CONFLICT (stats_date, db4s_download)
+			DO UPDATE
+				SET num_downloads = $2
+				WHERE db4s_downloads_weekly.stats_date = $1
+					AND db4s_downloads_weekly.db4s_download = 0`
+	commandTag, err := pg.Exec(dbQuery, date, count)
+	if err != nil {
+		// For now, don't bother logging a failure here.  This *might* need changing later on
+		return err
+	}
+	if numRows := commandTag.RowsAffected(); numRows != 1 {
+		log.Printf("Wrong number of rows (%v) affected when adding a weekly download stats row: %v\n", numRows, date)
+	}
+
+	// Update the version-specific weekly download stats
+	for version, DLCount := range DLsPerVersion {
+		dbQuery = `
+		INSERT INTO db4s_downloads_weekly (stats_date, db4s_download, num_downloads)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (stats_date, db4s_download)
+			DO UPDATE
+				SET num_downloads = $3
+				WHERE db4s_downloads_weekly.stats_date = $1
+					AND db4s_downloads_weekly.db4s_download = $2`
+		commandTag, err := pg.Exec(dbQuery, date, version, DLCount)
+		if err != nil {
+			// For now, don't bother logging a failure here.  This *might* need changing later on
+			return err
+		}
+		if numRows := commandTag.RowsAffected(); numRows > 1 {
+			log.Printf("Wrong number of rows (%v) affected when adding a weekly download stats row: %v\n", numRows, date)
+		}
+	}
+	return nil
+}
+
+// saveWeeklyUsersStats() inserts new or updated weekly stats counts into the db4s_users_weekly table
+func saveWeeklyUsersStats(date time.Time, count int, IPsPerUserAgent map[string]int) error {
 	// Update the non-version-specific weekly stats
 	// NOTE - The hard coded 1 value for the release version corresponds to the manually added "Unique IPs" entry in
 	// the release version table
