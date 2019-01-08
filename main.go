@@ -68,11 +68,11 @@ var (
 	// Toggle for display of debugging info
 	debug = false
 
-	// PostgreSQL Connection pool
-	pg *pgx.ConnPool
-
 	// Use Jaeger?
 	enableJaeger = false
+
+	// PostgreSQL Connection pool
+	pg *pgx.ConnPool
 )
 
 func main() {
