@@ -47,6 +47,7 @@ type TomlConfig struct {
 }
 type JaegerInfo struct {
 	CollectorEndPoint string
+	Enable            bool // Should Jaeger be used?
 }
 type PGInfo struct {
 	Database       string
@@ -67,9 +68,6 @@ var (
 
 	// Toggle for display of debugging info
 	debug = false
-
-	// Use Jaeger?
-	enableJaeger = false
 
 	// PostgreSQL Connection pool
 	pg *pgx.ConnPool
@@ -551,7 +549,7 @@ func getIPs(startDate time.Time, endDate time.Time) (IPs int, userAgentIPs map[s
 // initJaeger returns an instance of Jaeger Tracer
 func initJaeger(service string) (opentracing.Tracer, io.Closer) {
 	samplerConst := 1.0
-	if !enableJaeger {
+	if !Conf.Jaeger.Enable {
 		samplerConst = 0.0
 	}
 	cfg := &config.Configuration{
