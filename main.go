@@ -366,19 +366,19 @@ func initJaeger(service string) (opentracing.Tracer, io.Closer) {
 	return tracer, closer
 }
 
-// saveDailyStats() inserts new or updated daily stats counts into the db4s_stats_daily table
+// saveDailyStats() inserts new or updated daily stats counts into the db4s_users_daily table
 func saveDailyStats(date time.Time, count int, IPsPerUserAgent map[string]int) error {
 	// Update the non-version-specific daily stats
 	// NOTE - The hard coded 1 value for the release version corresponds to the manually added "Unique IPs" entry in
 	// the DB4S release info table
 	dbQuery := `
-		INSERT INTO db4s_stats_daily (stats_date, db4s_release, unique_ips)
+		INSERT INTO db4s_users_daily (stats_date, db4s_release, unique_ips)
 		VALUES ($1, 1, $2)
 		ON CONFLICT (stats_date, db4s_release)
 			DO UPDATE
 				SET unique_ips = $2
-				WHERE db4s_stats_daily.stats_date = $1
-					AND db4s_stats_daily.db4s_release = 1`
+				WHERE db4s_users_daily.stats_date = $1
+					AND db4s_users_daily.db4s_release = 1`
 	commandTag, err := pg.Exec(dbQuery, date, count)
 	if err != nil {
 		// For now, don't bother logging a failure here.  This *might* need changing later on
@@ -398,13 +398,13 @@ func saveDailyStats(date time.Time, count int, IPsPerUserAgent map[string]int) e
 			FROM db4s_release_info
 			WHERE version_number = $2
 		)
-		INSERT INTO db4s_stats_daily (stats_date, db4s_release, unique_ips)
+		INSERT INTO db4s_users_daily (stats_date, db4s_release, unique_ips)
 		SELECT $1, (SELECT release_id FROM ver), $3
 		ON CONFLICT (stats_date, db4s_release)
 			DO UPDATE
 				SET unique_ips = $3
-				WHERE db4s_stats_daily.stats_date = $1
-					AND db4s_stats_daily.db4s_release = (SELECT release_id FROM ver)`
+				WHERE db4s_users_daily.stats_date = $1
+					AND db4s_users_daily.db4s_release = (SELECT release_id FROM ver)`
 		commandTag, err := pg.Exec(dbQuery, date, versionString, verCount)
 		if err != nil {
 			// For now, don't bother logging a failure here.  This *might* need changing later on
@@ -417,19 +417,19 @@ func saveDailyStats(date time.Time, count int, IPsPerUserAgent map[string]int) e
 	return nil
 }
 
-// saveMonthlyStats() inserts new or updated weekly stats counts into the db4s_stats_monthly table
+// saveMonthlyStats() inserts new or updated weekly stats counts into the db4s_users_monthly table
 func saveMonthlyStats(date time.Time, count int, IPsPerUserAgent map[string]int) error {
 	// Update the non-version-specific monthly stats
 	// NOTE - The hard coded 1 value for the release version corresponds to the manually added "Unique IPs" entry in
 	// the release version table
 	dbQuery := `
-		INSERT INTO db4s_stats_monthly (stats_date, db4s_release, unique_ips)
+		INSERT INTO db4s_users_monthly (stats_date, db4s_release, unique_ips)
 		VALUES ($1, 1, $2)
 		ON CONFLICT (stats_date, db4s_release)
 			DO UPDATE
 				SET unique_ips = $2
-				WHERE db4s_stats_monthly.stats_date = $1
-					AND db4s_stats_monthly.db4s_release = 1`
+				WHERE db4s_users_monthly.stats_date = $1
+					AND db4s_users_monthly.db4s_release = 1`
 	commandTag, err := pg.Exec(dbQuery, date, count)
 	if err != nil {
 		// For now, don't bother logging a failure here.  This *might* need changing later on
@@ -449,13 +449,13 @@ func saveMonthlyStats(date time.Time, count int, IPsPerUserAgent map[string]int)
 			FROM db4s_release_info
 			WHERE version_number = $2
 		)
-		INSERT INTO db4s_stats_monthly (stats_date, db4s_release, unique_ips)
+		INSERT INTO db4s_users_monthly (stats_date, db4s_release, unique_ips)
 		SELECT $1, (SELECT release_id FROM ver), $3
 		ON CONFLICT (stats_date, db4s_release)
 			DO UPDATE
 				SET unique_ips = $3
-				WHERE db4s_stats_monthly.stats_date = $1
-					AND db4s_stats_monthly.db4s_release = (SELECT release_id FROM ver)`
+				WHERE db4s_users_monthly.stats_date = $1
+					AND db4s_users_monthly.db4s_release = (SELECT release_id FROM ver)`
 		commandTag, err := pg.Exec(dbQuery, date, versionString, verCount)
 		if err != nil {
 			// For now, don't bother logging a failure here.  This *might* need changing later on
@@ -468,19 +468,19 @@ func saveMonthlyStats(date time.Time, count int, IPsPerUserAgent map[string]int)
 	return nil
 }
 
-// saveWeeklyStats() inserts new or updated weekly stats counts into the db4s_stats_weekly table
+// saveWeeklyStats() inserts new or updated weekly stats counts into the db4s_users_weekly table
 func saveWeeklyStats(date time.Time, count int, IPsPerUserAgent map[string]int) error {
 	// Update the non-version-specific weekly stats
 	// NOTE - The hard coded 1 value for the release version corresponds to the manually added "Unique IPs" entry in
 	// the release version table
 	dbQuery := `
-		INSERT INTO db4s_stats_weekly (stats_date, db4s_release, unique_ips)
+		INSERT INTO db4s_users_weekly (stats_date, db4s_release, unique_ips)
 		VALUES ($1, 1, $2)
 		ON CONFLICT (stats_date, db4s_release)
 			DO UPDATE
 				SET unique_ips = $2
-				WHERE db4s_stats_weekly.stats_date = $1
-					AND db4s_stats_weekly.db4s_release = 1`
+				WHERE db4s_users_weekly.stats_date = $1
+					AND db4s_users_weekly.db4s_release = 1`
 	commandTag, err := pg.Exec(dbQuery, date, count)
 	if err != nil {
 		// For now, don't bother logging a failure here.  This *might* need changing later on
@@ -500,13 +500,13 @@ func saveWeeklyStats(date time.Time, count int, IPsPerUserAgent map[string]int) 
 			FROM db4s_release_info
 			WHERE version_number = $2
 		)
-		INSERT INTO db4s_stats_weekly (stats_date, db4s_release, unique_ips)
+		INSERT INTO db4s_users_weekly (stats_date, db4s_release, unique_ips)
 		SELECT $1, (SELECT release_id FROM ver), $3
 		ON CONFLICT (stats_date, db4s_release)
 			DO UPDATE
 				SET unique_ips = $3
-				WHERE db4s_stats_weekly.stats_date = $1
-					AND db4s_stats_weekly.db4s_release = (SELECT release_id FROM ver)`
+				WHERE db4s_users_weekly.stats_date = $1
+					AND db4s_users_weekly.db4s_release = (SELECT release_id FROM ver)`
 		commandTag, err := pg.Exec(dbQuery, date, versionString, verCount)
 		if err != nil {
 			// For now, don't bother logging a failure here.  This *might* need changing later on
