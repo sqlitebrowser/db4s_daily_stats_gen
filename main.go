@@ -426,7 +426,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			OR request = '/DB.Browser.for.SQLite-3.11.1-win64.zip'
 			OR request = '/DB.Browser.for.SQLite-3.11.1.dmg')
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&DLs)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -441,7 +442,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/DB.Browser.for.SQLite-3.10.1.dmg'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	var a int32
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
@@ -454,7 +456,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/DB.Browser.for.SQLite-3.10.1-win32.exe'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -466,7 +469,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/DB.Browser.for.SQLite-3.10.1-win64.exe'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -478,7 +482,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/SQLiteDatabaseBrowserPortable_3.10.1_English.paf.exe'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -492,7 +497,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/DB.Browser.for.SQLite-3.11.0-win32.msi'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -504,7 +510,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/DB.Browser.for.SQLite-3.11.0-win32.zip'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -516,7 +523,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/DB.Browser.for.SQLite-3.11.0-win64.msi'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -528,7 +536,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/DB.Browser.for.SQLite-3.11.0-win64.zip'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -540,7 +549,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/DB.Browser.for.SQLite-3.11.0.dmg'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -554,7 +564,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/DB.Browser.for.SQLite-3.11.1-win32.msi'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -566,7 +577,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/DB.Browser.for.SQLite-3.11.1-win32.zip'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -578,7 +590,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/DB.Browser.for.SQLite-3.11.1-win64.msi'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -590,7 +603,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/DB.Browser.for.SQLite-3.11.1-win64.zip'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -602,7 +616,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		FROM download_log
 		WHERE request = '/DB.Browser.for.SQLite-3.11.1.dmg'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
@@ -626,7 +641,8 @@ func getIPs(startDate time.Time, endDate time.Time) (IPs int, userAgentIPs map[s
 		WHERE request = '/currentrelease'
 			AND http_user_agent LIKE 'sqlitebrowser %' AND http_user_agent NOT LIKE '%AppEngine%'
 			AND request_time > $1
-			AND request_time < $2`
+			AND request_time < $2
+			AND status = 200`
 	rows, err := pg.Query(dbQuery, &startDate, &endDate)
 	if err != nil {
 		log.Printf("Database query failed: %v\n", err)

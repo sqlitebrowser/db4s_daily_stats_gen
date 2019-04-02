@@ -598,6 +598,27 @@ CREATE UNIQUE INDEX db4s_users_weekly_stats_date_db4s_release_uindex ON public.d
 
 
 --
+-- Name: download_log_request_index; Type: INDEX; Schema: public; Owner: db4s
+--
+
+CREATE INDEX download_log_request_index ON public.download_log USING btree (request);
+
+
+--
+-- Name: download_log_request_time_index; Type: INDEX; Schema: public; Owner: db4s
+--
+
+CREATE INDEX download_log_request_time_index ON public.download_log USING btree (request_time);
+
+
+--
+-- Name: download_log_status_index; Type: INDEX; Schema: public; Owner: db4s
+--
+
+CREATE INDEX download_log_status_index ON public.download_log USING btree (status);
+
+
+--
 -- Name: db4s_downloads_daily db4s_downloads_daily_db4s_download_info_download_id_fk; Type: FK CONSTRAINT; Schema: public; Owner: db4s
 --
 
