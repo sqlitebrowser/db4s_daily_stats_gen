@@ -431,7 +431,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			OR request = '/DB.Browser.for.SQLite-3.11.2-win64.msi'
 			OR request = '/DB.Browser.for.SQLite-3.11.2-win64.zip'
 			OR request = '/DB.Browser.for.SQLite-3.11.2.dmg'
-			OR request = '/SQLiteDatabaseBrowserPortable_3.11.2_English.paf.exe')
+			OR request = '/SQLiteDatabaseBrowserPortable_3.11.2_English.paf.exe'
+			OR request = '/SQLiteDatabaseBrowserPortable_3.11.2_Rev_2_English.paf.exe')
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
@@ -712,6 +713,19 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		return
 	}
 	DLsPerVersion[20] = a // 20 is "3.11.2 Portable" (as per the db4s_download_info table
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/SQLiteDatabaseBrowserPortable_3.11.2_Rev_2_English.paf.exe'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[21] = a // 21 is "3.11.2 Portable v2" (as per the db4s_download_info table
 
 	return
 }
