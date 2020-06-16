@@ -432,7 +432,12 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			OR request = '/DB.Browser.for.SQLite-3.11.2-win64.zip'
 			OR request = '/DB.Browser.for.SQLite-3.11.2.dmg'
 			OR request = '/SQLiteDatabaseBrowserPortable_3.11.2_English.paf.exe'
-			OR request = '/SQLiteDatabaseBrowserPortable_3.11.2_Rev_2_English.paf.exe')
+			OR request = '/SQLiteDatabaseBrowserPortable_3.11.2_Rev_2_English.paf.exe'
+			OR request = '/DB.Browser.for.SQLite-3.12.0-win32.msi'
+			OR request = '/DB.Browser.for.SQLite-3.12.0-win32.zip'
+			OR request = '/DB.Browser.for.SQLite-3.12.0-win64.msi'
+			OR request = '/DB.Browser.for.SQLite-3.12.0-win64.zip'
+			OR request = '/DB.Browser.for.SQLite-3.12.0.dmg')
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
@@ -458,7 +463,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[1] = a // 1 is "3.10.1 macOS" (as per the db4s_download_info table
+	DLsPerVersion[1] = a // 1 is "3.10.1 macOS" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -471,7 +476,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[2] = a // 2 is "3.10.1 win32" (as per the db4s_download_info table
+	DLsPerVersion[2] = a // 2 is "3.10.1 win32" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -484,7 +489,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[3] = a // 3 is "3.10.1 win64" (as per the db4s_download_info table
+	DLsPerVersion[3] = a // 3 is "3.10.1 win64" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -497,7 +502,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[4] = a // 4 is "3.10.1 Portable" (as per the db4s_download_info table
+	DLsPerVersion[4] = a // 4 is "3.10.1 Portable" (as per the db4s_download_info table)
 
 	// 3.11.0
 	dbQuery = `
@@ -512,7 +517,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[5] = a // 5 is "3.11.0 Win32 MSI" (as per the db4s_download_info table
+	DLsPerVersion[5] = a // 5 is "3.11.0 Win32 MSI" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -525,7 +530,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[6] = a // 6 is "3.11.0 Win32 .zip" (as per the db4s_download_info table
+	DLsPerVersion[6] = a // 6 is "3.11.0 Win32 .zip" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -538,7 +543,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[7] = a // 7 is "3.11.0 Win64 MSI" (as per the db4s_download_info table
+	DLsPerVersion[7] = a // 7 is "3.11.0 Win64 MSI" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -551,7 +556,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[8] = a // 8 is "3.11.0 Win64 .zip" (as per the db4s_download_info table
+	DLsPerVersion[8] = a // 8 is "3.11.0 Win64 .zip" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -564,7 +569,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[9] = a // 9 is "3.11.0 macOS" (as per the db4s_download_info table
+	DLsPerVersion[9] = a // 9 is "3.11.0 macOS" (as per the db4s_download_info table)
 
 	// 3.11.1
 	dbQuery = `
@@ -579,7 +584,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[10] = a // 10 is "3.11.1 Win32 MSI" (as per the db4s_download_info table
+	DLsPerVersion[10] = a // 10 is "3.11.1 Win32 MSI" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -592,7 +597,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[11] = a // 11 is "3.11.1 Win32 .zip" (as per the db4s_download_info table
+	DLsPerVersion[11] = a // 11 is "3.11.1 Win32 .zip" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -605,7 +610,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[12] = a // 12 is "3.11.1 Win64 MSI" (as per the db4s_download_info table
+	DLsPerVersion[12] = a // 12 is "3.11.1 Win64 MSI" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -618,7 +623,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[13] = a // 13 is "3.11.1 Win64 .zip" (as per the db4s_download_info table
+	DLsPerVersion[13] = a // 13 is "3.11.1 Win64 .zip" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -632,7 +637,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[14] = a // 14 is "3.11.1 macOS" (as per the db4s_download_info table
+	DLsPerVersion[14] = a // 14 is "3.11.1 macOS" (as per the db4s_download_info table)
 
 	// 3.11.2
 	dbQuery = `
@@ -647,7 +652,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[15] = a // 15 is "3.11.2 Win32 MSI" (as per the db4s_download_info table
+	DLsPerVersion[15] = a // 15 is "3.11.2 Win32 MSI" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -660,7 +665,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[16] = a // 16 is "3.11.2 Win32 .zip" (as per the db4s_download_info table
+	DLsPerVersion[16] = a // 16 is "3.11.2 Win32 .zip" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -673,7 +678,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[17] = a // 17 is "3.11.2 Win64 MSI" (as per the db4s_download_info table
+	DLsPerVersion[17] = a // 17 is "3.11.2 Win64 MSI" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -686,7 +691,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[18] = a // 18 is "3.11.2 Win64 .zip" (as per the db4s_download_info table
+	DLsPerVersion[18] = a // 18 is "3.11.2 Win64 .zip" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -699,7 +704,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[19] = a // 19 is "3.11.2 macOS" (as per the db4s_download_info table
+	DLsPerVersion[19] = a // 19 is "3.11.2 macOS" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -712,7 +717,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[20] = a // 20 is "3.11.2 Portable" (as per the db4s_download_info table
+	DLsPerVersion[20] = a // 20 is "3.11.2 Portable" (as per the db4s_download_info table)
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -725,7 +730,74 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
-	DLsPerVersion[21] = a // 21 is "3.11.2 Portable v2" (as per the db4s_download_info table
+	DLsPerVersion[21] = a // 21 is "3.11.2 Portable v2" (as per the db4s_download_info table)
+
+	// 3.12.0
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-3.12.0-win32.msi'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[22] = a // 22 is "DB4S 3.12.0 win32 msi" (as per the db4s_download_info table)
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-3.12.0-win32.zip'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[23] = a // 23 is "DB4S 3.12.0 win32 zip" (as per the db4s_download_info table)
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-3.12.0-win64.msi'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[24] = a // 24 is "DB4S 3.12.0 win64 msi" (as per the db4s_download_info table)
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-3.12.0-win64.zip'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[25] = a // 25 is "DB4S 3.12.0 win64 zip" (as per the db4s_download_info table)
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-3.12.0.dmg'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[26] = a // 26 is "DB4S 3.12.0 macOS" (as per the db4s_download_info table)
 
 	return
 }
