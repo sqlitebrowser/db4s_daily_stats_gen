@@ -438,7 +438,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			OR request = '/DB.Browser.for.SQLite-3.12.0-win64.msi'
 			OR request = '/DB.Browser.for.SQLite-3.12.0-win64.zip'
 			OR request = '/DB.Browser.for.SQLite-3.12.0.dmg'
-			OR request = '/SQLiteDatabaseBrowserPortable_3.12.0_English.paf.exe
+			OR request = '/SQLiteDatabaseBrowserPortable_3.12.0_English.paf.exe'
 			OR request = '/DB.Browser.for.SQLite-3.12.2-win32.msi'
 			OR request = '/DB.Browser.for.SQLite-3.12.2-win32.zip'
 			OR request = '/DB.Browser.for.SQLite-3.12.2-win64.msi'
