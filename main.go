@@ -24,30 +24,21 @@ import (
 	"crypto/md5"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/jackc/pgx"
-	"github.com/jackc/pgx/pgtype"
-	"github.com/mitchellh/go-homedir"
-	"github.com/opentracing/opentracing-go"
-	"github.com/uber/jaeger-client-go"
-	"github.com/uber/jaeger-client-go/config"
+	"github.com/jackc/pgx/v5/pgtype"
+	pgpool "github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Configuration file
 type TomlConfig struct {
-	Jaeger JaegerInfo
-	Pg     PGInfo
-}
-type JaegerInfo struct {
-	CollectorEndPoint string
-	Enable            bool // Should Jaeger be used?
+	Pg PGInfo
 }
 type PGInfo struct {
 	Database       string
@@ -70,7 +61,7 @@ var (
 	debug = false
 
 	// PostgreSQL Connection pool
-	pg *pgx.ConnPool
+	DB *pgpool.Pool
 )
 
 func main() {
@@ -80,7 +71,7 @@ func main() {
 	if configFile == "" {
 		// TODO: Might be a good idea to add permission checks of the dir & conf file, to ensure they're not
 		//       world readable.  Similar in concept to what ssh does for its config files.
-		userHome, err := homedir.Dir()
+		userHome, err := os.UserHomeDir()
 		if err != nil {
 			log.Fatalf("User home directory couldn't be determined: %s", "\n")
 		}
@@ -92,6 +83,18 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Check if an environment variable override for debug mode was present
+	debugEnv := os.Getenv("DB4S_DAILY_STATS_DEBUG")
+	if debugEnv != "" {
+		debug, err = strconv.ParseBool(debugEnv)
+		if err != nil {
+			log.Fatalf("Couldn't parse DB4S_DAILY_STATS_DEBUG environment variable")
+		}
+	}
+	if debug {
+		log.Println("Running with debug output enabled")
+	}
+
 	// If a command line argument of "-d" was given (the only thing we check for), then enable "daily" mode
 	if len(os.Args) > 1 && os.Args[1] == "-d" {
 		dailyMode = true
@@ -100,32 +103,36 @@ func main() {
 		}
 	}
 
-	// Set up initial Jaeger service and span
-	tracer, closer := initJaeger("db4s stats generator")
-	defer closer.Close()
-	opentracing.SetGlobalTracer(tracer)
-
 	// * Connect to PG database *
-	pgSpan := tracer.StartSpan("connect postgres")
 
-	// Setup the PostgreSQL config
-	pgConfig := new(pgx.ConnConfig)
-	pgConfig.Host = Conf.Pg.Server
-	pgConfig.Port = uint16(Conf.Pg.Port)
-	pgConfig.User = Conf.Pg.Username
-	pgConfig.Password = Conf.Pg.Password
-	pgConfig.Database = Conf.Pg.Database
-	clientTLSConfig := tls.Config{InsecureSkipVerify: true}
+	// Prepare TLS configuration
+	tlsConfig := tls.Config{}
 	if Conf.Pg.SSL {
-		// TODO: Likely need to add the PG TLS cert file info here
-		pgConfig.TLSConfig = &clientTLSConfig
+		tlsConfig.ServerName = Conf.Pg.Server
+		tlsConfig.InsecureSkipVerify = false
 	} else {
-		pgConfig.TLSConfig = nil
+		tlsConfig.InsecureSkipVerify = true
 	}
 
-	// Connect to PG
-	pgPoolConfig := pgx.ConnPoolConfig{*pgConfig, Conf.Pg.NumConnections, nil, 5 * time.Second}
-	pg, err = pgx.NewConnPool(pgPoolConfig)
+	// Set the main PostgreSQL database configuration values
+	pgConfig, err := pgpool.ParseConfig(fmt.Sprintf("host=%s port=%d user= %s password = %s dbname=%s pool_max_conns=%d connect_timeout=10", Conf.Pg.Server, uint16(Conf.Pg.Port), Conf.Pg.Username, Conf.Pg.Password, Conf.Pg.Database, Conf.Pg.NumConnections))
+	if err != nil {
+		return
+	}
+
+	// Gorm connection string
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s connect_timeout=10 sslmode=", Conf.Pg.Server, uint16(Conf.Pg.Port), Conf.Pg.Username, Conf.Pg.Password, Conf.Pg.Database)
+
+	// Enable encrypted connections where needed
+	if Conf.Pg.SSL {
+		pgConfig.ConnConfig.TLSConfig = &tlsConfig
+		dsn += "require"
+	} else {
+		dsn += "disable"
+	}
+
+	// Connect to database
+	DB, err = pgpool.New(context.Background(), pgConfig.ConnString())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -134,16 +141,12 @@ func main() {
 	if debug {
 		log.Printf("Connected to PostgreSQL server: %v:%v\n", Conf.Pg.Server, uint16(Conf.Pg.Port))
 	}
-	pgSpan.Finish()
 
 	// Add any new user agents to the db4s_release_info table
-	uaSpan := tracer.StartSpan("update user agents")
-	uaCtx := opentracing.ContextWithSpan(context.Background(), uaSpan)
-	err = updateUserAgents(uaCtx)
+	err = updateUserAgents(context.Background())
 	if err != nil {
 		log.Fatalf(err.Error())
 	}
-	uaSpan.Finish()
 
 	// * Daily users *
 
@@ -162,7 +165,6 @@ func main() {
 		startDate = time.Date(2018, 8, 13, 0, 0, 0, 0, time.UTC)
 	}
 	endDate := startDate.Add(time.Hour * 24)
-	dailySpan := tracer.StartSpan("calculate daily users")
 	for endDate.Before(time.Now().AddDate(0, 0, 1)) {
 		numIPs, IPsPerUserAgent, err := getIPs(startDate, endDate)
 		if err != nil {
@@ -181,7 +183,6 @@ func main() {
 		startDate = startDate.AddDate(0, 0, 1)
 		endDate = startDate.AddDate(0, 0, 1)
 	}
-	dailySpan.Finish()
 
 	// * Weekly users *
 
@@ -214,7 +215,6 @@ func main() {
 		}
 	}
 	endDate = startDate.AddDate(0, 0, 7)
-	wkSpan := tracer.StartSpan("calculate weekly users")
 	for endDate.Before(time.Now().AddDate(0, 0, 7)) {
 		numIPs, IPsPerUserAgent, err := getIPs(startDate, endDate)
 		if err != nil {
@@ -234,7 +234,6 @@ func main() {
 		startDate = startDate.AddDate(0, 0, 7)
 		endDate = startDate.AddDate(0, 0, 7)
 	}
-	wkSpan.Finish()
 
 	// * Monthly users *
 
@@ -250,7 +249,6 @@ func main() {
 		startDate = time.Date(2018, 8, 1, 0, 0, 0, 0, time.UTC)
 	}
 	endDate = startDate.AddDate(0, 1, 0)
-	mthSpan := tracer.StartSpan("calculate monthly users")
 	for endDate.Before(time.Now().AddDate(0, 1, 0)) {
 		numIPs, IPsPerUserAgent, err := getIPs(startDate, endDate)
 		if err != nil {
@@ -269,7 +267,6 @@ func main() {
 		startDate = startDate.AddDate(0, 1, 0)
 		endDate = startDate.AddDate(0, 1, 0)
 	}
-	mthSpan.Finish()
 
 	// * Daily downloads *
 
@@ -287,7 +284,6 @@ func main() {
 		startDate = time.Date(2018, 8, 9, 0, 0, 0, 0, time.UTC)
 	}
 	endDate = startDate.Add(time.Hour * 24)
-	dailyDLSpan := tracer.StartSpan("calculate daily downloads")
 	for endDate.Before(time.Now().AddDate(0, 0, 1)) {
 		numDLs, DLsPerVersion, err := getDownloads(startDate, endDate)
 		if err != nil {
@@ -306,7 +302,6 @@ func main() {
 		startDate = startDate.AddDate(0, 0, 1)
 		endDate = startDate.AddDate(0, 0, 1)
 	}
-	dailyDLSpan.Finish()
 
 	// * Weekly downloads *
 
@@ -338,7 +333,6 @@ func main() {
 		}
 	}
 	endDate = startDate.AddDate(0, 0, 7)
-	wkDLSpan := tracer.StartSpan("calculate weekly downloads")
 	for endDate.Before(time.Now().AddDate(0, 0, 7)) {
 		numDLs, DLsPerVersion, err := getDownloads(startDate, endDate)
 		if err != nil {
@@ -358,7 +352,6 @@ func main() {
 		startDate = startDate.AddDate(0, 0, 7)
 		endDate = startDate.AddDate(0, 0, 7)
 	}
-	wkDLSpan.Finish()
 
 	// * Monthly downloads *
 
@@ -374,7 +367,6 @@ func main() {
 		startDate = time.Date(2018, 8, 1, 0, 0, 0, 0, time.UTC)
 	}
 	endDate = startDate.AddDate(0, 1, 0)
-	mthDLSpan := tracer.StartSpan("calculate monthly downloads")
 	for endDate.Before(time.Now().AddDate(0, 1, 0)) {
 		numDLs, DLsPerVersion, err := getDownloads(startDate, endDate)
 		if err != nil {
@@ -393,10 +385,9 @@ func main() {
 		startDate = startDate.AddDate(0, 1, 0)
 		endDate = startDate.AddDate(0, 1, 0)
 	}
-	mthDLSpan.Finish()
 
 	// Close the PG connection gracefully
-	pg.Close()
+	DB.Close()
 
 	// Display debug info if appropriate
 	if debug {
@@ -444,11 +435,19 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			OR request = '/DB.Browser.for.SQLite-3.12.2-win64.msi'
 			OR request = '/DB.Browser.for.SQLite-3.12.2-win64.zip'
 			OR request = '/DB.Browser.for.SQLite-3.12.2.dmg'
-			OR request = '/SQLiteDatabaseBrowserPortable_3.12.2_English.paf.exe')
-			AND request_time > $1
-			AND request_time < $2
-			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&DLs)
+			OR request = '/DB.Browser.for.SQLite-arm64-3.12.2.dmg'
+			OR request = '/SQLiteDatabaseBrowserPortable_3.12.2_English.paf.exe'
+			OR request = '/DB.Browser.for.SQLite-v3.13.0.dmg'
+			OR request = '/DB.Browser.for.SQLite-v3.13.0-win32.msi'
+			OR request = '/DB.Browser.for.SQLite-v3.13.0-win32.zip'
+			OR request = '/DB.Browser.for.SQLite-v3.13.0-win64.msi'
+			OR request = '/DB.Browser.for.SQLite-v3.13.0-win64.zip'
+			OR request = '/DB.Browser.for.SQLite-v3.13.0-x86.64.AppImage'
+	    )
+		AND request_time > $1
+		AND request_time < $2
+		AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&DLs)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -465,7 +464,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time < $2
 			AND status = 200`
 	var a int32
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -478,7 +477,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -491,7 +490,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -504,7 +503,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -519,7 +518,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -532,7 +531,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -545,7 +544,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -558,7 +557,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -571,7 +570,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -586,7 +585,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -599,7 +598,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -612,7 +611,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -625,7 +624,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -639,7 +638,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -654,7 +653,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -667,7 +666,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -680,7 +679,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -693,7 +692,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -706,7 +705,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -719,7 +718,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -732,7 +731,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -747,7 +746,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -760,7 +759,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -773,7 +772,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -786,7 +785,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -799,7 +798,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -812,7 +811,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -827,7 +826,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -840,7 +839,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -853,7 +852,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -866,7 +865,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -879,7 +878,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
@@ -892,12 +891,112 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	err = pg.QueryRow(dbQuery, &startDate, &endDate).Scan(&a)
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
 	if err != nil {
 		log.Fatalf("Database query failed: %v\n", err)
 		return
 	}
 	DLsPerVersion[33] = a // 33 is "DB4S 3.12.2 Portable" (as per the db4s_download_info table)
+
+	// 3.13.0
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-arm64-3.12.2.dmg'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[34] = a // 34 is "DB.Browser.for.SQLite-arm64-3.12.2.dmg" (as per the db4s_download_info table)
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-v3.13.0.dmg'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[35] = a // 35 is "DB.Browser.for.SQLite-v3.13.0.dmg" (as per the db4s_download_info table)
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-v3.13.0-win32.msi'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[36] = a // 36 is "DB.Browser.for.SQLite-v3.13.0-win32.msi" (as per the db4s_download_info table)
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-v3.13.0-win32.zip'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[37] = a // 37 is "DB.Browser.for.SQLite-v3.13.0-win32.zip" (as per the db4s_download_info table)
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-v3.13.0-win64.msi'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[38] = a // 38 is "DB.Browser.for.SQLite-v3.13.0-win64.msi" (as per the db4s_download_info table)
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-v3.13.0-win64.zip'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[39] = a // 39 is "DB.Browser.for.SQLite-v3.13.0-win64.zip" (as per the db4s_download_info table)
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-v3.13.0-x86.64.AppImage'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[40] = a // 40 is "DB.Browser.for.SQLite-v3.13.0-x86.64.AppImage" (as per the db4s_download_info table)
 	return
 }
 
@@ -917,7 +1016,7 @@ func getIPs(startDate time.Time, endDate time.Time) (IPs int, userAgentIPs map[s
 			AND request_time > $1
 			AND request_time < $2
 			AND status = 200`
-	rows, err := pg.Query(dbQuery, &startDate, &endDate)
+	rows, err := DB.Query(context.Background(), dbQuery, &startDate, &endDate)
 	if err != nil {
 		log.Printf("Database query failed: %v\n", err)
 		return
@@ -937,11 +1036,11 @@ func getIPs(startDate time.Time, endDate time.Time) (IPs int, userAgentIPs map[s
 		// Work out the key to use.  We use a hash of the IP address, to stop weird characters in the IP Strange field
 		// being a problem
 		var IPHash [16]byte
-		if IPStrange.Status == pgtype.Present {
+		if IPStrange.String != "" && IPStrange.Valid {
 			IPHash = md5.Sum([]byte(IPStrange.String))
-		} else if IPv6.Status == pgtype.Present {
+		} else if IPv6.String != "" && IPv6.Valid {
 			IPHash = md5.Sum([]byte(IPv6.String))
-		} else if IPv4.Status == pgtype.Present {
+		} else if IPv4.String != "" && IPv4.Valid {
 			IPHash = md5.Sum([]byte(IPv4.String))
 		} else {
 			// This shouldn't happen, but check for it just in case
@@ -972,29 +1071,6 @@ func getIPs(startDate time.Time, endDate time.Time) (IPs int, userAgentIPs map[s
 	return
 }
 
-// initJaeger returns an instance of Jaeger Tracer
-func initJaeger(service string) (opentracing.Tracer, io.Closer) {
-	samplerConst := 1.0
-	if !Conf.Jaeger.Enable {
-		samplerConst = 0.0
-	}
-	cfg := &config.Configuration{
-		ServiceName: service,
-		Sampler: &config.SamplerConfig{
-			Type:  "const",
-			Param: samplerConst,
-		},
-		Reporter: &config.ReporterConfig{
-			CollectorEndpoint: Conf.Jaeger.CollectorEndPoint,
-		},
-	}
-	tracer, closer, err := cfg.NewTracer(config.Logger(jaeger.StdLogger))
-	if err != nil {
-		panic(fmt.Sprintf("ERROR: cannot init Jaeger: %v\n", err))
-	}
-	return tracer, closer
-}
-
 // saveDailyDownloadsStats() inserts new or updated daily download stats counts into the db4s_downloads_daily table
 func saveDailyDownloadsStats(date time.Time, count int32, DLsPerVersion map[int]int32) error {
 	// Update the non-version-specific daily stats
@@ -1008,7 +1084,7 @@ func saveDailyDownloadsStats(date time.Time, count int32, DLsPerVersion map[int]
 				SET num_downloads = $2
 				WHERE db4s_downloads_daily.stats_date = $1
 					AND db4s_downloads_daily.db4s_download = 0`
-	commandTag, err := pg.Exec(dbQuery, date, count)
+	commandTag, err := DB.Exec(context.Background(), dbQuery, date, count)
 	if err != nil {
 		// For now, don't bother logging a failure here.  This *might* need changing later on
 		return err
@@ -1027,7 +1103,7 @@ func saveDailyDownloadsStats(date time.Time, count int32, DLsPerVersion map[int]
 				SET num_downloads = $3
 				WHERE db4s_downloads_daily.stats_date = $1
 					AND db4s_downloads_daily.db4s_download = $2`
-		commandTag, err := pg.Exec(dbQuery, date, version, DLCount)
+		commandTag, err := DB.Exec(context.Background(), dbQuery, date, version, DLCount)
 		if err != nil {
 			// For now, don't bother logging a failure here.  This *might* need changing later on
 			return err
@@ -1052,7 +1128,7 @@ func saveDailyUsersStats(date time.Time, count int, IPsPerUserAgent map[string]i
 				SET unique_ips = $2
 				WHERE db4s_users_daily.stats_date = $1
 					AND db4s_users_daily.db4s_release = 1`
-	commandTag, err := pg.Exec(dbQuery, date, count)
+	commandTag, err := DB.Exec(context.Background(), dbQuery, date, count)
 	if err != nil {
 		// For now, don't bother logging a failure here.  This *might* need changing later on
 		return err
@@ -1078,7 +1154,7 @@ func saveDailyUsersStats(date time.Time, count int, IPsPerUserAgent map[string]i
 				SET unique_ips = $3
 				WHERE db4s_users_daily.stats_date = $1
 					AND db4s_users_daily.db4s_release = (SELECT release_id FROM ver)`
-		commandTag, err := pg.Exec(dbQuery, date, versionString, verCount)
+		commandTag, err := DB.Exec(context.Background(), dbQuery, date, versionString, verCount)
 		if err != nil {
 			// For now, don't bother logging a failure here.  This *might* need changing later on
 			return err
@@ -1103,7 +1179,7 @@ func saveMonthlyDownloadsStats(date time.Time, count int32, DLsPerVersion map[in
 				SET num_downloads = $2
 				WHERE db4s_downloads_monthly.stats_date = $1
 					AND db4s_downloads_monthly.db4s_download = 0`
-	commandTag, err := pg.Exec(dbQuery, date, count)
+	commandTag, err := DB.Exec(context.Background(), dbQuery, date, count)
 	if err != nil {
 		// For now, don't bother logging a failure here.  This *might* need changing later on
 		return err
@@ -1122,7 +1198,7 @@ func saveMonthlyDownloadsStats(date time.Time, count int32, DLsPerVersion map[in
 				SET num_downloads = $3
 				WHERE db4s_downloads_monthly.stats_date = $1
 					AND db4s_downloads_monthly.db4s_download = $2`
-		commandTag, err := pg.Exec(dbQuery, date, version, DLCount)
+		commandTag, err := DB.Exec(context.Background(), dbQuery, date, version, DLCount)
 		if err != nil {
 			// For now, don't bother logging a failure here.  This *might* need changing later on
 			return err
@@ -1147,7 +1223,7 @@ func saveMonthlyUsersStats(date time.Time, count int, IPsPerUserAgent map[string
 				SET unique_ips = $2
 				WHERE db4s_users_monthly.stats_date = $1
 					AND db4s_users_monthly.db4s_release = 1`
-	commandTag, err := pg.Exec(dbQuery, date, count)
+	commandTag, err := DB.Exec(context.Background(), dbQuery, date, count)
 	if err != nil {
 		// For now, don't bother logging a failure here.  This *might* need changing later on
 		return err
@@ -1173,7 +1249,7 @@ func saveMonthlyUsersStats(date time.Time, count int, IPsPerUserAgent map[string
 				SET unique_ips = $3
 				WHERE db4s_users_monthly.stats_date = $1
 					AND db4s_users_monthly.db4s_release = (SELECT release_id FROM ver)`
-		commandTag, err := pg.Exec(dbQuery, date, versionString, verCount)
+		commandTag, err := DB.Exec(context.Background(), dbQuery, date, versionString, verCount)
 		if err != nil {
 			// For now, don't bother logging a failure here.  This *might* need changing later on
 			return err
@@ -1198,7 +1274,7 @@ func saveWeeklyDownloadsStats(date time.Time, count int32, DLsPerVersion map[int
 				SET num_downloads = $2
 				WHERE db4s_downloads_weekly.stats_date = $1
 					AND db4s_downloads_weekly.db4s_download = 0`
-	commandTag, err := pg.Exec(dbQuery, date, count)
+	commandTag, err := DB.Exec(context.Background(), dbQuery, date, count)
 	if err != nil {
 		// For now, don't bother logging a failure here.  This *might* need changing later on
 		return err
@@ -1217,7 +1293,7 @@ func saveWeeklyDownloadsStats(date time.Time, count int32, DLsPerVersion map[int
 				SET num_downloads = $3
 				WHERE db4s_downloads_weekly.stats_date = $1
 					AND db4s_downloads_weekly.db4s_download = $2`
-		commandTag, err := pg.Exec(dbQuery, date, version, DLCount)
+		commandTag, err := DB.Exec(context.Background(), dbQuery, date, version, DLCount)
 		if err != nil {
 			// For now, don't bother logging a failure here.  This *might* need changing later on
 			return err
@@ -1242,7 +1318,7 @@ func saveWeeklyUsersStats(date time.Time, count int, IPsPerUserAgent map[string]
 				SET unique_ips = $2
 				WHERE db4s_users_weekly.stats_date = $1
 					AND db4s_users_weekly.db4s_release = 1`
-	commandTag, err := pg.Exec(dbQuery, date, count)
+	commandTag, err := DB.Exec(context.Background(), dbQuery, date, count)
 	if err != nil {
 		// For now, don't bother logging a failure here.  This *might* need changing later on
 		return err
@@ -1268,7 +1344,7 @@ func saveWeeklyUsersStats(date time.Time, count int, IPsPerUserAgent map[string]
 				SET unique_ips = $3
 				WHERE db4s_users_weekly.stats_date = $1
 					AND db4s_users_weekly.db4s_release = (SELECT release_id FROM ver)`
-		commandTag, err := pg.Exec(dbQuery, date, versionString, verCount)
+		commandTag, err := DB.Exec(context.Background(), dbQuery, date, versionString, verCount)
 		if err != nil {
 			// For now, don't bother logging a failure here.  This *might* need changing later on
 			return err
@@ -1283,9 +1359,6 @@ func saveWeeklyUsersStats(date time.Time, count int, IPsPerUserAgent map[string]
 // updateUserAgents() retrieves the full list of user agents present in the daily request logs, then ensures there's an
 // entry for each one in the main stats processing reference table
 func updateUserAgents(ctx context.Context) error {
-	span, _ := opentracing.StartSpanFromContext(ctx, "update user agents")
-	defer span.Finish()
-
 	if debug {
 		log.Printf("Updating DB4S user agents list in the database...")
 	}
@@ -1298,7 +1371,7 @@ func updateUserAgents(ctx context.Context) error {
 		WHERE request = '/currentrelease'
 			AND http_user_agent LIKE 'sqlitebrowser %' AND http_user_agent NOT LIKE '%AppEngine%'
 		ORDER BY http_user_agent ASC`
-	rows, err := pg.Query(dbQuery)
+	rows, err := DB.Query(context.Background(), dbQuery)
 	if err != nil {
 		log.Printf("Database query failed: %v\n", err)
 		return err
@@ -1312,7 +1385,7 @@ func updateUserAgents(ctx context.Context) error {
 			log.Printf("Error retrieving rows: %v\n", err)
 			return err
 		}
-		if userAgent.Status == pgtype.Present {
+		if userAgent.String != "" && userAgent.Valid {
 			v := strings.TrimPrefix(userAgent.String, "sqlitebrowser ")
 			userAgents = append(userAgents, v)
 		}
@@ -1320,11 +1393,15 @@ func updateUserAgents(ctx context.Context) error {
 
 	// Insert any missing user agents into the db4s_release_info table
 	for _, j := range userAgents {
+		if debug {
+			log.Printf("Adding user agent '%v'", j)
+		}
+
 		dbQuery = `
 			INSERT INTO db4s_release_info (version_number)
 			VALUES ($1)
 			ON CONFLICT DO NOTHING`
-		commandTag, err := pg.Exec(dbQuery, j)
+		commandTag, err := DB.Exec(context.Background(), dbQuery, j)
 		if err != nil {
 			// For now, don't bother logging a failure here.  This *might* need changing later on
 			return err
