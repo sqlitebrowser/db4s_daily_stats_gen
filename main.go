@@ -443,6 +443,12 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			OR request = '/DB.Browser.for.SQLite-v3.13.0-win64.msi'
 			OR request = '/DB.Browser.for.SQLite-v3.13.0-win64.zip'
 			OR request = '/DB.Browser.for.SQLite-v3.13.0-x86.64.AppImage'
+			OR request = '/DB.Browser.for.SQLite-v3.13.1.dmg'
+			OR request = '/DB.Browser.for.SQLite-v3.13.1-win32.msi'
+			OR request = '/DB.Browser.for.SQLite-v3.13.1-win32.zip'
+			OR request = '/DB.Browser.for.SQLite-v3.13.1-win64.msi'
+			OR request = '/DB.Browser.for.SQLite-v3.13.1-win64.zip'
+			OR request = '/DB.Browser.for.SQLite-v3.13.1-x86.64.AppImage'
 	    )
 		AND request_time > $1
 		AND request_time < $2
@@ -898,8 +904,6 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 	}
 	DLsPerVersion[33] = a // 33 is "DB4S 3.12.2 Portable" (as per the db4s_download_info table)
 
-	// 3.13.0
-
 	dbQuery = `
 		SELECT count(*)
 		FROM download_log
@@ -913,6 +917,8 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		return
 	}
 	DLsPerVersion[34] = a // 34 is "DB.Browser.for.SQLite-arm64-3.12.2.dmg" (as per the db4s_download_info table)
+
+	// 3.13.0
 
 	dbQuery = `
 		SELECT count(*)
@@ -997,6 +1003,92 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		return
 	}
 	DLsPerVersion[40] = a // 40 is "DB.Browser.for.SQLite-v3.13.0-x86.64.AppImage" (as per the db4s_download_info table)
+
+	// 3.13.1
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-v3.13.1.dmg'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[41] = a // 41 is "DB.Browser.for.SQLite-v3.13.1.dmg" (as per the db4s_download_info table)
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-v3.13.1-win32.msi'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[42] = a // 42 is "DB.Browser.for.SQLite-v3.13.1-win32.msi" (as per the db4s_download_info table)
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-v3.13.1-win32.zip'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[43] = a // 43 is "DB.Browser.for.SQLite-v3.13.1-win32.zip" (as per the db4s_download_info table)
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-v3.13.1-win64.msi'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[44] = a // 44 is "DB.Browser.for.SQLite-v3.13.1-win64.msi" (as per the db4s_download_info table)
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-v3.13.1-win64.zip'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[45] = a // 45 is "DB.Browser.for.SQLite-v3.13.1-win64.zip" (as per the db4s_download_info table)
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-v3.13.1-x86.64.AppImage'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[46] = a // 46 is "DB.Browser.for.SQLite-v3.13.1-x86.64.AppImage" (as per the db4s_download_info table)
 	return
 }
 
