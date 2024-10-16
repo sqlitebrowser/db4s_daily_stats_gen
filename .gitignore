@@ -1,3 +1,4 @@
 .idea/
 config.toml
 db4s_daily_stats_gen
+.tool-versions
