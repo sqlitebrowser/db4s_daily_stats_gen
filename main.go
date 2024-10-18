@@ -449,6 +449,7 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 			OR request = '/DB.Browser.for.SQLite-v3.13.1-win64.msi'
 			OR request = '/DB.Browser.for.SQLite-v3.13.1-win64.zip'
 			OR request = '/DB.Browser.for.SQLite-v3.13.1-x86.64.AppImage'
+			OR request = '/DB.Browser.for.SQLite-v3.13.1-x86.64-v2.AppImage'
 	    )
 		AND request_time > $1
 		AND request_time < $2
@@ -1089,6 +1090,20 @@ func getDownloads(startDate time.Time, endDate time.Time) (DLs int32, DLsPerVers
 		return
 	}
 	DLsPerVersion[46] = a // 46 is "DB.Browser.for.SQLite-v3.13.1-x86.64.AppImage" (as per the db4s_download_info table)
+
+	dbQuery = `
+		SELECT count(*)
+		FROM download_log
+		WHERE request = '/DB.Browser.for.SQLite-v3.13.1-x86.64-v2.AppImage'
+			AND request_time > $1
+			AND request_time < $2
+			AND status = 200`
+	err = DB.QueryRow(context.Background(), dbQuery, &startDate, &endDate).Scan(&a)
+	if err != nil {
+		log.Fatalf("Database query failed: %v\n", err)
+		return
+	}
+	DLsPerVersion[47] = a // 47 is "DB.Browser.for.SQLite-v3.13.1-x86.64-v2.AppImage" (as per the db4s_download_info table)
 	return
 }
 
